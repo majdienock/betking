@@ -1,7 +1,7 @@
 {
-  "name": "BetKing - Sports & Games",
-  "short_name": "BetKing",
-  "description": "BetKing Official App - Live Scores, Matches & Interactive Entertainment",
+  "name": "BetPesa - Sports & Games",
+  "short_name": "BetPesa",
+  "description": "BetPesa Official App - Live Scores, Matches & Interactive Entertainment",
   "start_url": "/",
   "id": "/",
   "display": "standalone",

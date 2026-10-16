@@ -22,7 +22,7 @@ try { dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']); } catch (e) {}
 
 const mongoose = require('mongoose');
 
-const MONGODB_URI = process.argv[2] || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/betking';
+const MONGODB_URI = process.argv[2] || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/betpesa';
 
 function describeUri(uri) {
   // Strip credentials, keep host + database path so we can see which DB is targeted.

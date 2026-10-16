@@ -19,11 +19,11 @@ import { getBackendOrigin } from '../../../core/config/backend-url';
         <div class="lb-auth-topbar-inner">
           <a class="lb-auth-logo">
             <span class="lb-auth-mark">
-              <img src="assets/images/betking-logo.png" alt="" onerror="this.style.display='none'" />
+              <img src="assets/images/betpesa-logo.png" alt="" onerror="this.style.display='none'" />
             </span>
-            <span class="lb-auth-word"><b>Bet</b>King</span>
+            <span class="lb-auth-word"><b>Bet</b>Pesa</span>
           </a>
-          <span class="lb-auth-tagline" *ngIf="!isSanitized()">Weka BetKing Yako. Shinda Kubwa.</span>
+          <span class="lb-auth-tagline" *ngIf="!isSanitized()">Weka BetPesa Yako. Shinda Kubwa.</span>
         </div>
       </header>
 
@@ -32,9 +32,9 @@ import { getBackendOrigin } from '../../../core/config/backend-url';
 
           <!-- APP DOWNLOAD BANNER -->
           <div class="lb-auth-app" (click)="triggerAppDownload()">
-            <img src="assets/images/betking-logo.png" alt="BetKing App" class="lb-auth-app-logo" onerror="this.src='favicon.svg'" />
+            <img src="assets/images/betpesa-logo.png" alt="BetPesa App" class="lb-auth-app-logo" onerror="this.src='favicon.svg'" />
             <div class="lb-auth-app-text">
-              <span class="lb-auth-app-title">BetKing Mobile App</span>
+              <span class="lb-auth-app-title">BetPesa Mobile App</span>
               <span class="lb-auth-app-sub">{{ isSanitized() ? 'Fast & Smooth &bull; Free Data Mode' : 'Instant Aviator &bull; Free Data Mode' }}</span>
             </div>
             <button type="button" class="lb-auth-app-btn">
@@ -275,7 +275,7 @@ import { getBackendOrigin } from '../../../core/config/backend-url';
                      [class.from-admin]="msg.sender === 'admin'">
                   <div class="lb-support-bubble">
                     <div class="lb-bubble-meta">
-                      <span class="lb-bubble-sender">{{ msg.sender === 'admin' ? 'BetKing Support' : 'You' }}</span>
+                      <span class="lb-bubble-sender">{{ msg.sender === 'admin' ? 'BetPesa Support' : 'You' }}</span>
                       <span class="lb-bubble-time">{{ msg.created_at | date:'shortTime' }}</span>
                     </div>
                     <div class="lb-bubble-text">{{ msg.text }}</div>
@@ -301,7 +301,7 @@ import { getBackendOrigin } from '../../../core/config/backend-url';
           </div>
         </section>
 
-        <p class="lb-auth-foot">{{ isSanitized() ? '18+ only &bull; betking.site' : '18+ only &bull; Play responsibly &bull; betking.site' }}</p>
+        <p class="lb-auth-foot">{{ isSanitized() ? '18+ only &bull; betpesa.site' : '18+ only &bull; Play responsibly &bull; betpesa.site' }}</p>
       </main>
     </div>
 
@@ -1116,10 +1116,10 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
 
   public triggerAppDownload(): void {
     if (typeof window !== 'undefined') {
-      if ((window as any).__betkingPromptInstall) {
-        (window as any).__betkingPromptInstall();
+      if ((window as any).__betpesaPromptInstall) {
+        (window as any).__betpesaPromptInstall();
       } else {
-        window.dispatchEvent(new CustomEvent('betking-install-app'));
+        window.dispatchEvent(new CustomEvent('betpesa-install-app'));
       }
     }
   }

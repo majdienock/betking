@@ -70,10 +70,10 @@
       "has": [
         {
           "type": "host",
-          "value": "www.betking.site"
+          "value": "www.betpesa.site"
         }
       ],
-      "destination": "https://betking.site/:path*",
+      "destination": "https://betpesa.site/:path*",
       "permanent": true
     }
   ]

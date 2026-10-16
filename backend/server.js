@@ -61,7 +61,7 @@ if (!JWT_SECRET) {
     startupConfigurationErrors.push(message);
     console.error(`FATAL: ${message}`);
   } else {
-    JWT_SECRET = 'betking-local-development-secret-jwt-key-min-32-chars-safe';
+    JWT_SECRET = 'betpesa-local-development-secret-jwt-key-min-32-chars-safe';
     console.warn('⚠️ WARNING: JWT_SECRET not set in environment. Using default local development secret. Set a strong JWT_SECRET in production.');
   }
 } else if (JWT_SECRET.length < 32 && process.env.NODE_ENV === 'production') {
@@ -125,8 +125,8 @@ const defaultCorsOrigins = [
   'http://127.0.0.1:4200',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  'https://betking.site',
-  'https://www.betking.site'
+  'https://betpesa.site',
+  'https://www.betpesa.site'
 ];
 const envCorsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
@@ -1234,19 +1234,19 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
         const mpesaKey = process.env.MPESA_CONNECT_KEY;
 
         const mpesaRes = mpesaApiUrl && mpesaKey ? await axios.post(mpesaApiUrl, {
-          app: 'betking',
+          app: 'betpesa',
           phone: targetPhone,
           adminPhone: targetPhone,
           amount,
           apiKey: mpesaKey,
           reference: adminMpesaCode,
-          notes: 'Withdrawal payout from BETKING'
+          notes: 'Withdrawal payout from BETPESA'
         }, { timeout: 4000 }) : null;
 
         if (mpesaRes?.data && mpesaRes.data.success) {
           if (mpesaRes.data.smsReceipt) mpesaMessage = mpesaRes.data.smsReceipt;
           if (mpesaRes.data.newBalance !== undefined) mpesaNewBalance = mpesaRes.data.newBalance;
-          console.log(`✅ [M-PESA SYNC] BetKing admin withdrawal KES ${amount} credited to MPESA app (New balance: KES ${mpesaNewBalance})`);
+          console.log(`✅ [M-PESA SYNC] BetPesa admin withdrawal KES ${amount} credited to MPESA app (New balance: KES ${mpesaNewBalance})`);
         }
       } catch (syncErr) {
         console.warn('⚠️ [M-PESA SYNC] MPESA app sync error:', syncErr.response?.data || syncErr.message);
@@ -1268,11 +1268,11 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
         const fallbackBal = mpesaNewBalance !== null
           ? Number(mpesaNewBalance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
           : (parseFloat(newBalance) + amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        mpesaMessage = `${adminMpesaCode} Confirmed. You have received Ksh${formattedAmount} from BETKING on ${dateStr} at ${timeStr}. New M-PESA balance is Ksh${fallbackBal}. Separate personal and business funds through Pochi la Biashara on *334#.`;
+        mpesaMessage = `${adminMpesaCode} Confirmed. You have received Ksh${formattedAmount} from BETPESA on ${dateStr} at ${timeStr}. New M-PESA balance is Ksh${fallbackBal}. Separate personal and business funds through Pochi la Biashara on *334#.`;
       } else {
         mpesaMessage = mpesaMessage.replace(/^Congratulations!\s*/i, '');
         if (!mpesaMessage.startsWith('UI')) {
-          mpesaMessage = `${adminMpesaCode} Confirmed. You have received Ksh${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from BETKING.`;
+          mpesaMessage = `${adminMpesaCode} Confirmed. You have received Ksh${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from BETPESA.`;
         }
       }
 
@@ -1594,7 +1594,7 @@ app.post([
       ? cleanPhone.slice(1) 
       : (cleanPhone.startsWith('0') ? `254${cleanPhone.slice(1)}` : (cleanPhone.startsWith('254') ? cleanPhone : `254${cleanPhone}`));
 
-    const checkoutRequestId = `BETKING-DEP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const checkoutRequestId = `BETPESA-DEP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     const deposit = await Deposit.create({
       user_id: req.user.id,
@@ -1639,7 +1639,7 @@ app.post([
           channel_id: channelId,
           provider: 'm-pesa',
           external_reference: checkoutRequestId,
-          customer_name: req.user?.username || 'BetKing Customer',
+          customer_name: req.user?.username || 'BetPesa Customer',
           callback_url: process.env.PAYHERO_CALLBACK_URL || PAYHERO_CALLBACK_URL
         }, {
           headers: { 
@@ -3710,7 +3710,7 @@ function sanitizeTicketForPlayer(ticket) {
       if (m.sender === 'admin') {
         return {
           ...m,
-          sender_name: 'BetKing Support'
+          sender_name: 'BetPesa Support'
         };
       }
       return m;
@@ -3778,7 +3778,7 @@ app.post('/api/admin/support/reply', authenticateAdminToken, async (req, res) =>
 
       ticket.messages.push({
         sender: 'admin',
-        sender_name: 'BetKing Support',
+        sender_name: 'BetPesa Support',
         text: replyText,
         created_at: new Date()
       });
@@ -3790,7 +3790,7 @@ app.post('/api/admin/support/reply', authenticateAdminToken, async (req, res) =>
 
       ticket.messages.push({
         sender: 'admin',
-        sender_name: 'BetKing Support',
+        sender_name: 'BetPesa Support',
         text: replyText,
         created_at: new Date()
       });

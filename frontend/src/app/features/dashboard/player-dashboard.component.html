@@ -9,9 +9,9 @@
 
       <a class="lb-logo" (click)="setNavTab('home')">
         <span class="lb-logo-mark">
-          <img src="assets/images/betking-logo.png" alt="" onerror="this.style.display='none'" />
+          <img src="assets/images/betpesa-logo.png" alt="" onerror="this.style.display='none'" />
         </span>
-        <span class="lb-logo-word"><b>Bet</b>King</span>
+        <span class="lb-logo-word"><b>Bet</b>Pesa</span>
       </a>
 
       <nav class="lb-mainnav">
@@ -186,7 +186,7 @@
             <img class="lb-hero-photo" [src]="banner.image" [alt]="banner.headline" (click)="openGame(banner.gameId)" />
             <div class="lb-hero-inner">
               <div class="lb-hero-brand">
-                <span class="lb-hero-mark"><b>Bet</b>King</span>
+                <span class="lb-hero-mark"><b>Bet</b>Pesa</span>
               </div>
               <div class="lb-hero-copy">
                 <h2>{{ banner.headline }}</h2>
@@ -450,7 +450,7 @@
         <div class="mpesa-logo">M</div>
         <div>
           <h2>M-PESA Deposit</h2>
-          <p class="modal-intro">Fund your BetKing account instantly</p>
+          <p class="modal-intro">Fund your BetPesa account instantly</p>
         </div>
       </div>
 
@@ -536,7 +536,7 @@
         </div>
         <div *ngFor="let msg of supportMessages()" class="support-bubble" [class.user]="msg.sender === 'user'" [class.admin]="msg.sender === 'admin'">
           <div class="support-bubble-head">
-            <strong>{{ msg.sender === 'admin' ? 'BetKing Support' : 'You' }}</strong>
+            <strong>{{ msg.sender === 'admin' ? 'BetPesa Support' : 'You' }}</strong>
             <span>{{ msg.created_at | date:'shortTime' }}</span>
           </div>
           <div class="support-bubble-text">{{ msg.text }}</div>

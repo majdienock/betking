@@ -101,8 +101,8 @@ async function run() {
     console.log(`   Role:     ${user.role}`);
     console.log(`   Balance:  KES ${user.balance}`);
     console.log(`=======================================================`);
-    console.log(`👉 Log in at https://betking.site/login`);
-    console.log(`👉 Admin dashboard at https://betking.site/admin\n`);
+    console.log(`👉 Log in at https://betpesa.site/login`);
+    console.log(`👉 Admin dashboard at https://betpesa.site/admin\n`);
 
     await mongoose.disconnect();
   } catch (err) {

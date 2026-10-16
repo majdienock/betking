@@ -1,13 +1,13 @@
 <app-withdrawal-notice></app-withdrawal-notice>
 <router-outlet></router-outlet>
 
-<!-- FLOATING BETKING APP DOWNLOAD PROMPT -->
-<aside 
+<!-- FLOATING BETPESA APP DOWNLOAD PROMPT -->
+<aside
   *ngIf="showDownloadPrompt() && !isPromptFreeRoute() && !isAdminUser()"
-  class="betking-floating-download" 
+  class="betpesa-floating-download"
   [class.is-downloading]="isDownloading()"
-  role="complementary" 
-  aria-label="Download BetKing App"
+  role="complementary"
+  aria-label="Download BetPesa App"
 >
   <div class="download-card-wrapper">
     <!-- Close button -->
@@ -20,9 +20,9 @@
 
     <!-- App Logo Icon -->
     <div class="app-icon-container">
-      <img 
-        src="/assets/images/betking-logo.png" 
-        alt="BetKing App Icon" 
+      <img
+        src="/assets/images/betpesa-logo.png"
+        alt="BetPesa App Icon"
         class="app-icon-img"
         onerror="this.src='/favicon.svg'"
       />
@@ -32,7 +32,7 @@
     <!-- App Info Details -->
     <div class="app-details-column">
       <div class="app-header-row">
-        <span class="app-name"><span class="name-betking">Bet</span><span class="name-bet">King</span> App</span>
+        <span class="app-name"><span class="name-betpesa">Bet</span><span class="name-bet">Pesa</span> App</span>
         <span class="badge-official">OFFICIAL</span>
       </div>
       <div class="app-rating-row">
@@ -44,12 +44,12 @@
     </div>
 
     <!-- Download CTA Button -->
-    <button 
-      type="button" 
-      class="btn-download-app" 
-      (click)="downloadApp()" 
+    <button
+      type="button"
+      class="btn-download-app"
+      (click)="downloadApp()"
       [disabled]="isDownloading()"
-      title="Download BetKing App & Save to Home Screen"
+      title="Download BetPesa App & Save to Home Screen"
     >
       <span *ngIf="!isDownloading()" class="btn-content">
         <svg class="download-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

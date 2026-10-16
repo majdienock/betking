@@ -7,8 +7,8 @@ import { getBackendOrigin } from '../config/backend-url';
 })
 export class SanitizedModeService {
   private http = inject(HttpClient);
-  private readonly storageKey = 'betking_admin_sanitized_mode';
-  private readonly predatorTextStorageKey = 'betking_predator_custom_text';
+  private readonly storageKey = 'betpesa_admin_sanitized_mode';
+  private readonly predatorTextStorageKey = 'betpesa_predator_custom_text';
 
   /** Reactive signal holding whether the clean / sanitized view is enabled */
   public readonly isSanitizedMode = signal<boolean>(this.loadInitialState());

@@ -11,4 +11,4 @@
  * service environment) to point a deployment at a different API, for example
  * the Render service that hosts this backend.
  */
-export const PRODUCTION_BACKEND_ORIGIN = 'https://api.betking.site';
+export const PRODUCTION_BACKEND_ORIGIN = 'https://api.betpesa.site';

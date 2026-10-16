@@ -15,7 +15,7 @@ export function getBackendOrigin(): string {
   const port = window.location.port;
 
   // If already served directly from the backend (e.g. on Render or backend static serving)
-  if (hostname.endsWith('.onrender.com') || hostname === 'api.betking.site' || port === '3000') {
+  if (hostname.endsWith('.onrender.com') || hostname === 'api.betpesa.site' || port === '3000') {
     return window.location.origin;
   }
 

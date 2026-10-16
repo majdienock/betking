@@ -417,7 +417,7 @@ export class AuthService {
               balance: liveMpesaBal,
               at: new Date(),
               codePrefix: mpesaCodePrefix || 'UI',
-              appName: 'BETKING'
+              appName: 'BETPESA'
             });
           }, 3500);
         }

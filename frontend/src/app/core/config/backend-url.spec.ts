@@ -3,11 +3,11 @@ import { getBackendOrigin } from './backend-url';
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('BetKing API routing', () => {
-  it.each(['betking.site', 'www.betking.site', 'betking-preview.vercel.app'])(
+describe('BetPesa API routing', () => {
+  it.each(['betpesa.site', 'www.betpesa.site', 'betpesa-preview.vercel.app'])(
     'routes frontend %s to the dedicated API', hostname => {
       vi.stubGlobal('window', { location: { hostname, port: '', origin: `https://${hostname}` } });
-      expect(getBackendOrigin()).toBe('https://api.betking.site');
+      expect(getBackendOrigin()).toBe('https://api.betpesa.site');
     }
   );
 
@@ -18,7 +18,7 @@ describe('BetKing API routing', () => {
     }
   );
 
-  it.each(['api.betking.site', 'betking-service.onrender.com'])(
+  it.each(['api.betpesa.site', 'betpesa-service.onrender.com'])(
     'keeps direct backend %s on its own origin', hostname => {
       vi.stubGlobal('window', { location: { hostname, port: '', origin: `https://${hostname}` } });
       expect(getBackendOrigin()).toBe(`https://${hostname}`);

@@ -1,4 +1,4 @@
-<div class="betking-auth-viewport">
+<div class="betpesa-auth-viewport">
   <div class="auth-mobile-container">
 
     <!-- MAIN CONTENT -->
@@ -7,10 +7,10 @@
       <!-- BRAND LOGO -->
       <div class="brand-header">
         <div class="brand-logo-badge">
-          <img src="/assets/images/betking-logo.png" alt="BetKing Logo" class="brand-logo-img" onerror="this.src='/favicon.svg'" />
+          <img src="/assets/images/betpesa-logo.png" alt="BetPesa Logo" class="brand-logo-img" onerror="this.src='/favicon.svg'" />
         </div>
         <h1 class="brand-title">
-          <span class="brand-betking">Bet</span><span class="brand-bet">King</span>
+          <span class="brand-betpesa">Bet</span><span class="brand-bet">Pesa</span>
         </h1>
         <p class="brand-tagline">Kenya's #1 Aviator & Sports Platform</p>
       </div>
@@ -33,7 +33,7 @@
             {{ isVerified ? 'Account Activated!' : 'Enter 6-Digit Code' }}
           </h2>
           <p class="verification-subtext">
-            {{ isVerified ? 'Welcome to BetKing! Redirecting you to your account...' : 'We sent an automated verification SMS code to:' }}
+            {{ isVerified ? 'Welcome to BetPesa! Redirecting you to your account...' : 'We sent an automated verification SMS code to:' }}
           </p>
           <p class="phone-number-display" *ngIf="!isVerified">
             {{ phoneNumber }}
@@ -45,7 +45,7 @@
           <div class="sms-pill-header">
             <div class="sms-sender-row">
               <span class="sms-dot"></span>
-              <span class="sms-sender">SMS &bull; BetKing OTP</span>
+              <span class="sms-sender">SMS &bull; BetPesa OTP</span>
             </div>
             <span class="sms-time">Just now</span>
           </div>
@@ -88,7 +88,7 @@
           >
             <span *ngIf="verificationStep === 'generating' || verificationStep === 'typing'">Receiving SMS Code...</span>
             <span *ngIf="verificationStep === 'verifying'">Validating Code...</span>
-            <span *ngIf="isVerified">Enter BetKing Now &rarr;</span>
+            <span *ngIf="isVerified">Enter BetPesa Now &rarr;</span>
           </button>
         </div>
 

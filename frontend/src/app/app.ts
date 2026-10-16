@@ -28,15 +28,15 @@ export class App implements OnInit {
   public readonly sanitizedMode = inject(SanitizedModeService);
   public readonly isSanitized = computed(() => this.isAdminUser() && this.sanitizedMode.isSanitizedMode());
   public readonly isAdminUser = signal<boolean>(false);
-  protected readonly title = signal('BetKing');
+  protected readonly title = signal('BetPesa');
 
   constructor() {
     effect(() => {
       const sanitized = this.isSanitized();
       if (typeof document !== 'undefined') {
         document.title = sanitized
-          ? 'BetKing - Interactive Sports, Live Scores & Games'
-          : 'BetKing - Sports Betting & Aviator Casino';
+          ? 'BetPesa - Interactive Sports, Live Scores & Games'
+          : 'BetPesa - Sports Betting & Aviator Casino';
       }
     });
   }
@@ -63,8 +63,8 @@ export class App implements OnInit {
     this.trackPromptFreeRoutes();
 
     // Global install trigger accessible from all components
-    (window as any).__betkingPromptInstall = () => this.downloadApp();
-    window.addEventListener('betking-install-app', () => this.downloadApp());
+    (window as any).__betpesaPromptInstall = () => this.downloadApp();
+    window.addEventListener('betpesa-install-app', () => this.downloadApp());
 
     // Listen for PWA beforeinstallprompt event
     window.addEventListener('beforeinstallprompt', (e: Event) => {
@@ -75,8 +75,8 @@ export class App implements OnInit {
 
     // Listen for appinstalled event (fired when user adds to home screen)
     window.addEventListener('appinstalled', () => {
-      localStorage.setItem('betking_app_downloaded', 'true');
-      sessionStorage.setItem('betking_prompt_dismissed', 'true');
+      localStorage.setItem('betpesa_app_downloaded', 'true');
+      sessionStorage.setItem('betpesa_prompt_dismissed', 'true');
       this.showDownloadPrompt.set(false);
       this.showIosGuide.set(false);
       this.cdr.detectChanges();
@@ -157,7 +157,7 @@ export class App implements OnInit {
       }
 
       // Check session dismissal
-      const isDismissed = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('betking_prompt_dismissed') === 'true';
+      const isDismissed = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('betpesa_prompt_dismissed') === 'true';
       if (isDismissed) {
         this.showDownloadPrompt.set(false);
       } else {
@@ -174,16 +174,16 @@ export class App implements OnInit {
 
     try {
       // Mark session and local storage
-      sessionStorage.setItem('betking_prompt_dismissed', 'true');
-      localStorage.setItem('betking_app_downloaded', 'true');
-      localStorage.setItem('betking_app_download_time', new Date().toISOString());
+      sessionStorage.setItem('betpesa_prompt_dismissed', 'true');
+      localStorage.setItem('betpesa_app_downloaded', 'true');
+      localStorage.setItem('betpesa_app_download_time', new Date().toISOString());
 
       // If PWA prompt is ready (Android/Chrome/Edge), trigger native Add to Home Screen dialog
       if (this.deferredPrompt) {
         this.deferredPrompt.prompt();
         this.deferredPrompt.userChoice.then((choiceResult: { outcome: string }) => {
           if (choiceResult.outcome === 'accepted') {
-            localStorage.setItem('betking_app_downloaded', 'true');
+            localStorage.setItem('betpesa_app_downloaded', 'true');
           }
           this.deferredPrompt = null;
         }).catch(() => {});
@@ -207,7 +207,7 @@ export class App implements OnInit {
 
   public dismissPrompt(): void {
     // Dismissing sets downloaded flag so it never comes back
-    localStorage.setItem('betking_app_downloaded', 'true');
+    localStorage.setItem('betpesa_app_downloaded', 'true');
     this.showDownloadPrompt.set(false);
     this.showIosGuide.set(false);
     this.cdr.detectChanges();

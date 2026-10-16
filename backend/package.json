@@ -1,7 +1,7 @@
 {
-  "name": "betking-backend",
+  "name": "betpesa-backend",
   "version": "1.0.0",
-  "description": "BETKING crash game API, realtime engine and admin backend",
+  "description": "BETPESA crash game API, realtime engine and admin backend",
   "main": "server.js",
   "scripts": {
     "setup-pin-owner": "node setup-admin-pin-owner.js",

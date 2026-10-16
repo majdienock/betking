@@ -124,7 +124,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       prize: 'KSH 1,000,000',
       prizeSuffix: 'every game!',
       cta: 'Play Now',
-      tag: 'betking.site 18+',
+      tag: 'betpesa.site 18+',
       gameId: 'kings-move',
       art: 'assets/games/photos/kings-move.jpg'
     },
@@ -173,7 +173,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
           prize: 'Champion Tier',
           prizeSuffix: 'every game!',
           cta: 'Play Now',
-          tag: 'betking.site 18+',
+          tag: 'betpesa.site 18+',
           gameId: 'kings-move',
           art: 'assets/games/photos/kings-move.jpg'
         },
@@ -289,7 +289,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       return [
         { id: 'sports', label: 'Sports' },
         { id: 'live', label: 'Live Matches' },
-        { id: 'betkingleague', label: 'BetKingLeague' },
+        { id: 'betpesaleague', label: 'BetPesaLeague' },
         { id: 'casino', label: 'Arcade' },
         { id: 'prediction', label: 'Predictions' },
         { id: 'jackpots', label: 'Challenges' },
@@ -300,7 +300,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     return [
       { id: 'sports', label: 'Sports Betting' },
       { id: 'live', label: 'Live Betting' },
-      { id: 'betkingleague', label: 'BetKingLeague' },
+      { id: 'betpesaleague', label: 'BetPesaLeague' },
       { id: 'casino', label: 'Casino' },
       { id: 'prediction', label: 'Prediction Market' },
       { id: 'jackpots', label: 'Jackpots' },
@@ -313,19 +313,19 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     if (this.isSanitized()) {
       return [
         { id: 'home', label: 'Home', icon: 'assets/icons/home.svg', badge: '' },
-        { id: 'live', label: 'BetKingLIVE', icon: 'assets/icons/live.svg', badge: '68' },
+        { id: 'live', label: 'BetPesaLIVE', icon: 'assets/icons/live.svg', badge: '68' },
         { id: 'soccer', label: 'Soccer', icon: 'assets/icons/soccer.svg', badge: '' },
-        { id: 'betkingleague', label: 'BetKingLeague', icon: 'assets/icons/league.svg', badge: '' },
+        { id: 'betpesaleague', label: 'BetPesaLeague', icon: 'assets/icons/league.svg', badge: '' },
         { id: 'aviator', label: 'Game', icon: 'assets/icons/games.svg', badge: '' },
-        { id: 'betkingpoly', label: 'BetKingPoly', icon: 'assets/icons/poly.svg', badge: '' },
+        { id: 'betpesapoly', label: 'BetPesaPoly', icon: 'assets/icons/poly.svg', badge: '' },
         { id: 'virtuals', label: 'Virtuals', icon: 'assets/icons/virtuals.svg', badge: 'NEW' },
         { id: 'games', label: 'Games', icon: 'assets/icons/games.svg', badge: '' },
         { id: 'crash', label: 'Skill', icon: 'assets/icons/crash.svg', badge: 'NEW' },
         { id: 'casino', label: 'Arcade', icon: 'assets/icons/casino.svg', badge: '' },
         { id: 'promos', label: 'Rewards', icon: 'assets/icons/promos.svg', badge: '6' },
-        { id: 'betkingnare', label: 'BetKingNare', icon: 'assets/icons/nare.svg', badge: '' },
+        { id: 'betpesanare', label: 'BetPesaNare', icon: 'assets/icons/nare.svg', badge: '' },
         { id: 'evolution', label: 'Evolution', icon: 'assets/icons/evolution.svg', badge: 'NEW' },
-        { id: 'betkingturbo', label: 'BetKingTurbo', icon: 'assets/icons/turbo.svg', badge: 'NEW' },
+        { id: 'betpesaturbo', label: 'BetPesaTurbo', icon: 'assets/icons/turbo.svg', badge: 'NEW' },
         { id: 'slots', label: 'Spin', icon: 'assets/icons/slots.svg', badge: '' },
         { id: 'esoccer', label: 'eSoccer', icon: 'assets/icons/esoccer.svg', badge: '' },
         { id: 'basketball', label: 'Basketball', icon: 'assets/icons/basketball.svg', badge: '' }
@@ -333,19 +333,19 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     }
     return [
       { id: 'home', label: 'Home', icon: 'assets/icons/home.svg', badge: '' },
-      { id: 'live', label: 'BetKingLIVE', icon: 'assets/icons/live.svg', badge: '68' },
+      { id: 'live', label: 'BetPesaLIVE', icon: 'assets/icons/live.svg', badge: '68' },
       { id: 'soccer', label: 'Soccer', icon: 'assets/icons/soccer.svg', badge: '' },
-      { id: 'betkingleague', label: 'BetKingLeague', icon: 'assets/icons/league.svg', badge: '' },
+      { id: 'betpesaleague', label: 'BetPesaLeague', icon: 'assets/icons/league.svg', badge: '' },
       { id: 'aviator', label: 'Aviator', icon: 'assets/images/aviator-dashboard-logo.png', badge: '' },
-      { id: 'betkingpoly', label: 'BetKingPoly', icon: 'assets/icons/poly.svg', badge: '' },
+      { id: 'betpesapoly', label: 'BetPesaPoly', icon: 'assets/icons/poly.svg', badge: '' },
       { id: 'virtuals', label: 'Virtuals', icon: 'assets/icons/virtuals.svg', badge: 'NEW' },
       { id: 'games', label: 'Games', icon: 'assets/icons/games.svg', badge: '' },
       { id: 'crash', label: 'Crash', icon: 'assets/icons/crash.svg', badge: 'NEW' },
       { id: 'casino', label: 'Casino', icon: 'assets/icons/casino.svg', badge: '' },
       { id: 'promos', label: 'Promos', icon: 'assets/icons/promos.svg', badge: '6' },
-      { id: 'betkingnare', label: 'BetKingNare', icon: 'assets/icons/nare.svg', badge: '' },
+      { id: 'betpesanare', label: 'BetPesaNare', icon: 'assets/icons/nare.svg', badge: '' },
       { id: 'evolution', label: 'Evolution', icon: 'assets/icons/evolution.svg', badge: 'NEW' },
-      { id: 'betkingturbo', label: 'BetKingTurbo', icon: 'assets/icons/turbo.svg', badge: 'NEW' },
+      { id: 'betpesaturbo', label: 'BetPesaTurbo', icon: 'assets/icons/turbo.svg', badge: 'NEW' },
       { id: 'slots', label: 'Slots', icon: 'assets/icons/slots.svg', badge: '' },
       { id: 'esoccer', label: 'eSoccer', icon: 'assets/icons/esoccer.svg', badge: '' },
       { id: 'basketball', label: 'Basketball', icon: 'assets/icons/basketball.svg', badge: '' }
@@ -357,16 +357,16 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     { id: 'aviator', name: 'Aviator', img: 'assets/images/aviator-dashboard-logo.png' },
     { id: 'aviatrix', name: 'Aviatrix', img: 'assets/games/aviatrix.svg' },
     { id: 'comet-crash', name: 'Comet Crash', img: 'assets/games/comet-crash.svg' },
-    { id: 'betkingnare', name: 'BetKingNare', img: 'assets/games/betkingnare.svg' },
+    { id: 'betpesanare', name: 'BetPesaNare', img: 'assets/games/betpesanare.svg' },
     { id: 'jetx', name: 'JetX', img: 'assets/games/jetx.svg' }
   ];
 
   readonly gameTiles = [
     { id: 'aviator', name: 'Aviator', img: 'assets/images/aviator-dashboard-logo.png' },
-    { id: 'betkinghero', name: 'BetKingHero', img: 'assets/games/betkinghero.svg' },
+    { id: 'betpesahero', name: 'BetPesaHero', img: 'assets/games/betpesahero.svg' },
     { id: 'kings-move', name: "King's Move", img: 'assets/games/kings-move.svg' },
     { id: 'jetx', name: 'JetX', img: 'assets/games/jetx.svg' },
-    { id: 'betkingviator', name: 'BetKing Viator', img: 'assets/games/betkingviator.svg' },
+    { id: 'betpesaviator', name: 'BetPesa Viator', img: 'assets/games/betpesaviator.svg' },
     { id: 'comet-crash', name: 'Comet Crash', img: 'assets/games/comet-crash.svg' }
   ];
 
@@ -375,15 +375,15 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       return [
         { id: 'crash', label: 'Fast Games', flame: true },
         { id: 'betbuilder', label: 'Match Builder', flame: false },
-        { id: 'betkingleague', label: 'BetKingLeague', flame: false },
-        { id: 'betkingpoly', label: 'BetKingPoly', flame: false }
+        { id: 'betpesaleague', label: 'BetPesaLeague', flame: false },
+        { id: 'betpesapoly', label: 'BetPesaPoly', flame: false }
       ];
     }
     return [
       { id: 'crash', label: 'Crash', flame: true },
       { id: 'betbuilder', label: 'BetBuilder', flame: false },
-      { id: 'betkingleague', label: 'BetKingLeague', flame: false },
-      { id: 'betkingpoly', label: 'BetKingPoly', flame: false }
+      { id: 'betpesaleague', label: 'BetPesaLeague', flame: false },
+      { id: 'betpesapoly', label: 'BetPesaPoly', flame: false }
     ];
   });
 
@@ -392,7 +392,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       return [
         { id: 'crash', label: 'Fast Games', count: 160 },
         { id: 'slots', label: 'Arcade', count: 1536 },
-        { id: 'exclusive', label: 'BetKing Exclusive', count: 24 },
+        { id: 'exclusive', label: 'BetPesa Exclusive', count: 24 },
         { id: 'virtuals', label: 'Virtuals', count: 25 },
         { id: 'wheel', label: 'Wheel Games', count: 31 },
         { id: 'dice', label: 'Dice', count: 66 },
@@ -402,7 +402,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     return [
       { id: 'crash', label: 'Crash', count: 160 },
       { id: 'slots', label: 'Slots', count: 1536 },
-      { id: 'exclusive', label: 'BetKing Exclusive', count: 24 },
+      { id: 'exclusive', label: 'BetPesa Exclusive', count: 24 },
       { id: 'virtuals', label: 'Virtuals', count: 25 },
       { id: 'wheel', label: 'Wheel Games', count: 31 },
       { id: 'dice', label: 'Dice', count: 66 },
@@ -861,10 +861,10 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     this.showProfileMenu.set(false);
     this.closeMobileMenu();
     if (typeof window !== 'undefined') {
-      if ((window as any).__betkingPromptInstall) {
-        (window as any).__betkingPromptInstall();
+      if ((window as any).__betpesaPromptInstall) {
+        (window as any).__betpesaPromptInstall();
       } else {
-        window.dispatchEvent(new CustomEvent('betking-install-app'));
+        window.dispatchEvent(new CustomEvent('betpesa-install-app'));
       }
     }
   }

@@ -365,7 +365,7 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   private activeFlightGain: GainNode | null = null;
   private activeFlyAwaySource: AudioBufferSourceNode | null = null;
   private audioWasArmed = false;
-  private readonly soundPreferenceKey = 'betking_aviator_sound_enabled';
+  private readonly soundPreferenceKey = 'betpesa_aviator_sound_enabled';
 
   constructor() {
     // The minimum deposit is admin-configurable and can change while this page
@@ -1668,7 +1668,7 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.withdrawalNotif.set({
       id: payload.id,
-      title: payload.title || 'BetKing Notification',
+      title: payload.title || 'BetPesa Notification',
       message: payload.message,
       type: payload.type || 'info',
       timestamp
@@ -2942,10 +2942,10 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   public downloadApp() {
     this.showProfileDropdown.set(false);
     if (typeof window !== 'undefined') {
-      if ((window as any).__betkingPromptInstall) {
-        (window as any).__betkingPromptInstall();
+      if ((window as any).__betpesaPromptInstall) {
+        (window as any).__betpesaPromptInstall();
       } else {
-        window.dispatchEvent(new CustomEvent('betking-install-app'));
+        window.dispatchEvent(new CustomEvent('betpesa-install-app'));
       }
     }
   }

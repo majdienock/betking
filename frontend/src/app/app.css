@@ -1,5 +1,5 @@
-/* FLOATING BETKING APP DOWNLOAD PROMPT */
-.betking-floating-download {
+/* FLOATING BETPESA APP DOWNLOAD PROMPT */
+.betpesa-floating-download {
   position: fixed;
   bottom: 20px;
   left: 50%;
@@ -112,7 +112,7 @@
   white-space: nowrap;
 }
 
-.name-betking {
+.name-betpesa {
   color: #f6c56f;
 }
 
@@ -218,7 +218,7 @@
 }
 
 @media (max-width: 480px) {
-  .betking-floating-download {
+  .betpesa-floating-download {
     bottom: 12px;
     width: calc(100% - 20px);
   }

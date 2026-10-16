@@ -10,13 +10,13 @@
  * is what lets the same commit deploy to Vercel (pointing at the Render API)
  * and to Render (pointing at itself) without a source edit in between.
  *
- * With BACKEND_ORIGIN unset each build writes the canonical api.betking.site origin.
+ * With BACKEND_ORIGIN unset each build writes the canonical api.betpesa.site origin.
  */
 const fs = require('fs');
 const path = require('path');
 
 const target = path.join(__dirname, '..', 'src', 'app', 'core', 'config', 'backend-origin.generated.ts');
-const raw = (process.env.BACKEND_ORIGIN || 'https://api.betking.site').trim();
+const raw = (process.env.BACKEND_ORIGIN || 'https://api.betpesa.site').trim();
 
 // A trailing slash produces "https://api.example.com//api/login", which some
 // proxies answer with a redirect that drops the Authorization header. Normalise

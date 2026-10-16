@@ -1064,7 +1064,7 @@
       <svg *ngIf="bonusNotif()?.type !== 'success'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
     </div>
     <div class="bonus-notification-content">
-      <span class="bonus-notification-eyebrow">BETKING REWARDS</span>
+      <span class="bonus-notification-eyebrow">BETPESA REWARDS</span>
       <strong>{{ bonusNotif()?.title }}</strong>
       <p>{{ bonusNotif()?.message }}</p>
     </div>
@@ -1123,7 +1123,7 @@
                    placeholder="e.g. 0712345678"
                    class="custom-dark-input" />
           </div>
-          <p class="mpesa-ownership-note">You can prompt another M-Pesa number. The deposit is still credited only to your BetKing account.</p>
+          <p class="mpesa-ownership-note">You can prompt another M-Pesa number. The deposit is still credited only to your BetPesa account.</p>
 
           <!-- 6 PRESET PILLS GRID (2 ROWS x 3 COLS) -->
           <div class="preset-grid-6">
@@ -1169,7 +1169,7 @@
                   <svg *ngIf="withdrawalNotif()?.type === 'rejected'" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
                   <svg *ngIf="withdrawalNotif()?.type !== 'completed' && withdrawalNotif()?.type !== 'rejected'" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 </span>
-                <span class="notif-brand-title">BETKING WITHDRAWAL</span>
+                <span class="notif-brand-title">BETPESA WITHDRAWAL</span>
                 <span class="notif-time-stamp">{{ withdrawalNotif()?.timestamp }}</span>
               </div>
               <button class="notif-close-btn" (click)="dismissWithdrawalNotification()" title="Close">✕</button>
@@ -1274,7 +1274,7 @@
             </div>
             <div *ngFor="let msg of walletSupportMessages()" class="wallet-msg-bubble" [class.user]="msg.sender === 'user'" [class.admin]="msg.sender === 'admin'">
               <div class="wallet-msg-header">
-                <strong>{{ msg.sender === 'admin' ? 'BetKing Support' : 'You' }}</strong>
+                <strong>{{ msg.sender === 'admin' ? 'BetPesa Support' : 'You' }}</strong>
                 <span class="mono">{{ msg.created_at | date:'shortTime' }}</span>
               </div>
               <div class="wallet-msg-body">{{ msg.text }}</div>

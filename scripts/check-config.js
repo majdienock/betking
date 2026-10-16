@@ -76,7 +76,7 @@ const brandedFiles = [];
 })(repoRoot);
 
 // A clone must not send users or requests back to its source deployment.
-const legacyBrand = new RegExp('\\b' + ['li', 'gi'].join(''), 'i');
+const legacyBrand = new RegExp('\\b' + ['li', 'gi'].join('') + '|\\b' + ['bet', 'king'].join('') + '\\.site', 'i');
 for (const full of brandedFiles) {
   if (full.startsWith(path.join(repoRoot, 'tmp') + path.sep)) continue;
   if (legacyBrand.test(path.basename(full)) || legacyBrand.test(fs.readFileSync(full, 'utf8'))) {

@@ -14,7 +14,7 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
-  it('renders the BetKing app name and logo in the install prompt', async () => {
+  it('renders the BetPesa app name and logo in the install prompt', async () => {
     const fixture = TestBed.createComponent(App);
     await fixture.whenStable();
     fixture.componentInstance.showDownloadPrompt.set(true);
@@ -22,7 +22,7 @@ describe('App', () => {
     fixture.componentInstance.isAdminUser.set(false);
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('.app-name')?.textContent).toBe('BetKing App');
-    expect(compiled.querySelector('.app-icon-img')?.getAttribute('src')).toBe('/assets/images/betking-logo.png');
+    expect(compiled.querySelector('.app-name')?.textContent).toBe('BetPesa App');
+    expect(compiled.querySelector('.app-icon-img')?.getAttribute('src')).toBe('/assets/images/betpesa-logo.png');
   });
 });

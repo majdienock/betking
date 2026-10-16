@@ -211,7 +211,7 @@
 }
 
 /* Keep the board clear; the same download action remains in the game menu. */
-body:has(#aviator-board.reference-interface) .betking-floating-download { display: none; }
+body:has(#aviator-board.reference-interface) .betpesa-floating-download { display: none; }
 .aviator-root .amount-display { display: none; }
 #aviator-board.reference-interface .amount-display { display: block; }
 #aviator-board.reference-interface .amount-stepper:has(.amount-input:focus) .amount-display { display: none; }

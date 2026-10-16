@@ -1,4 +1,4 @@
-# Render blueprint for BETKING.
+# Render blueprint for BETPESA.
 #
 # Render hosts the API only; Vercel builds and hosts the Angular frontend.
 #
@@ -7,13 +7,13 @@
 # instance would run its own independent round with its own multiplier and two
 # players would see different results for the same bet.
 #
-# Attach api.betking.site to this service under Settings → Custom Domains. The
+# Attach api.betpesa.site to this service under Settings → Custom Domains. The
 # frontend's committed default already points there, so a Vercel build with no
 # BACKEND_ORIGIN set still reaches the right API once that domain resolves.
 
 services:
   - type: web
-    name: betking
+    name: betpesa
     runtime: node
     plan: free
     region: frankfurt
@@ -38,7 +38,7 @@ services:
 
       # Add only this project's Vercel domains here if preview access is needed.
       - key: CORS_ORIGIN
-        value: https://betking.site,https://www.betking.site
+        value: https://betpesa.site,https://www.betpesa.site
 
       # Secrets: set these in the Render dashboard, never in this file.
       - key: JWT_SECRET
