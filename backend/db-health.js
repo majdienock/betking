@@ -7,8 +7,9 @@
  * Usage (from the backend folder):
  *   node db-health.js
  *
- * To check the deployed database, set MONGODB_URI in the terminal environment
- * to the same value used by Render, then run node db-health.js.
+ * To check the DEPLOYED database rather than the one in .env, pass the
+ * production URI from Render:
+ *   node db-health.js "mongodb+srv://user:pass@cluster0.../betpesa"
  *
  * Never prints credentials.
  */

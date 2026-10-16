@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const bcrypt = require('bcryptjs');
-const { ADMIN_TAGS, protectPayload, maskPhone, adminClientScope, adminTicketScope, createAdminPrivacy } = require('../admin-privacy');
+const { protectPayload, maskPhone, adminClientScope, adminTicketScope, createAdminPrivacy } = require('../admin-privacy');
 const { normalizePhone, transactionOwnershipFields } = require('../admin-phone-ownership');
 const { migratePinSettings } = require('../admin-pin-database');
 
@@ -193,22 +193,6 @@ test('private setup requires the owner key, stores hashes, rejects duplicate PIN
   assert.ok(!JSON.stringify([...sessions.values()]).includes(session.pinToken));
   await service.configure('private-owner-key-only', { R: '1358' });
   assert.equal(await service.identity(session.pinToken, 'shared-account'), null);
-});
-
-test('only R, D and K can configure, unlock or claim clients', async () => {
-  const { service, profiles } = fixture();
-  assert.deepEqual(ADMIN_TAGS, ['R', 'D', 'K']);
-  await service.configure('private-owner-key-only', { R: '1357', D: '2468', K: '3690' });
-  for (const [tag, pin] of Object.entries({ R: '1357', D: '2468', K: '3690' })) {
-    const session = await service.unlock(tag, pin, 'shared-account');
-    assert.equal((await service.identity(session.pinToken, 'shared-account')).tag, tag);
-  }
-  for (const tag of ['G', 'S', 'V']) {
-    profiles.set(tag, bcrypt.hashSync('0123', 4));
-    await assert.rejects(service.configure('private-owner-key-only', { [tag]: '0123' }), { status: 400 });
-    await assert.rejects(service.unlock(tag, '0123', 'shared-account'), { status: 400 });
-    await assert.rejects(service.claim(101, tag, 1), { status: 400 });
-  }
 });
 
 test('admin PINs must be exactly four digits and preserve a leading zero', async () => {

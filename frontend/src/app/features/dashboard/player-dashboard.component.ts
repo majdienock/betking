@@ -225,9 +225,12 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
    */
   readonly photoTiles: string[] = [
     'kings-move',
+    'betpesahero',
     'jetx',
+    'betpesaviator',
     'comet-crash',
     'instant-virtuals',
+    'betpesanare',
     'aviatrix'
   ];
 

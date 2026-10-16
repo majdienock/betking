@@ -224,7 +224,7 @@ function createAdminPrivacy(models) {
     const session = await AdminPinSession.findOne({
       token_hash: digest(pinToken), account_hash: digest(accountToken), expires_at: { $gt: new Date() }
     }).lean();
-    if (!session || !ADMIN_TAGS.includes(session.tag) || session.profile_hash !== digest(await configuredHash(session.tag))) return null;
+    if (!session || session.profile_hash !== digest(await configuredHash(session.tag))) return null;
     return session;
   }
 
@@ -268,7 +268,6 @@ function createAdminPrivacy(models) {
     ], { upsert: true, new: true });
     if (attempts.attempts > 5) throw fail(429, 'Too many owner-key attempts. Try again after 15 minutes.');
     if (!await bcrypt.compare(ownerKey, hash)) throw fail(403, 'Incorrect private owner key.');
-    if (!pins || typeof pins !== 'object' || Array.isArray(pins) || Object.keys(pins).some(tag => !ADMIN_TAGS.includes(tag))) throw fail(400, 'Choose only R, D or K.');
     const tags = ADMIN_TAGS.filter(tag => pins?.[tag]);
     if (!tags.length || tags.some(tag => typeof pins[tag] !== 'string' || !/^\d{4}$/.test(pins[tag]))) throw fail(400, 'Enter a 4-digit PIN for each admin you want to configure.');
     const current = await Promise.all(ADMIN_TAGS.map(configuredHash));

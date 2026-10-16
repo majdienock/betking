@@ -1724,7 +1724,7 @@
 .admin-tag-btn { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; margin:0; border-radius:5px; border:1px solid; font-weight:700; font-size:11px; line-height:1; cursor:pointer; transition:all .15s ease; }
 .admin-tag-btn:disabled { opacity:.4; cursor:not-allowed; }
 
-/* Distinct tag colors for S (Blue), G (Green), R (Red), V (Purple) */
+/* Distinct tag colors for K (Blue), D (Green), R (Red) */
 .tag-k { background:rgba(14,165,233,0.18)!important; border-color:rgba(56,189,248,0.55)!important; color:#38bdf8!important; }
 .admin-tag-btn.tag-k:hover:not(:disabled) { background:rgba(14,165,233,0.4)!important; border-color:#38bdf8!important; color:#ffffff!important; box-shadow:0 0 8px rgba(56,189,248,0.4)!important; }
 
