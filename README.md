@@ -55,6 +55,10 @@ build default: removing a temporary override restores the canonical API. All API
 requests and player/admin sockets use this origin. MongoDB, JWT and payment
 secrets belong only on Render.
 
+The original temporary Render hostname in `BACKEND_ORIGIN` is migrated to the
+custom API domain at build time. Login and registration stop waiting after
+30 seconds and show a retry message if the API cannot be reached.
+
 Add `betpesa.site` and `www.betpesa.site` in **Settings → Domains**. Configure
 the preferred domain and its redirect there; the project has no competing domain
 redirects. Use the exact DNS records Vercel shows. Before

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { BehaviorSubject, Observable, tap, catchError, of, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, tap, catchError, of, throwError, timeout } from 'rxjs';
 import { getBackendOrigin } from '../config/backend-url';
 import { WithdrawalNoticeService } from './withdrawal-notice.service';
 
@@ -248,6 +248,12 @@ export class AuthService {
    * every one of them as "Invalid phone number or password".
    */
   private toAuthError(err: any): AuthError {
+    if (err?.name === 'TimeoutError') {
+      return { status: 0, message: 'The server is taking too long to respond. Please try again.' };
+    }
+    if (err?.status === 0) {
+      return { status: 0, message: 'Unable to reach the server. Please check your connection and try again.' };
+    }
     return {
       status: typeof err?.status === 'number' ? err.status : 0,
       message: this.extractErrorMessage(err)
@@ -256,12 +262,14 @@ export class AuthService {
 
   public register(credentials: { username: string; phone_number?: string; password: string }): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.apiUrl}/register`, credentials).pipe(
+      timeout({ first: 30000 }),
       catchError(err => throwError(() => this.toAuthError(err)))
     );
   }
 
   public login(credentials: { username: string; password: string }): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.apiUrl}/login`, credentials).pipe(
+      timeout({ first: 30000 }),
       tap(res => this.setSession(res)),
       catchError(err => throwError(() => this.toAuthError(err)))
     );

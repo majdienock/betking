@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, computed, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -142,10 +142,10 @@ import { getBackendOrigin } from '../../../core/config/backend-url';
               <label for="termsCheckbox">I confirm I am 18+ and agree to the Terms and Privacy Policy</label>
             </div>
 
-            <button type="submit" class="lb-submit" [disabled]="isSubmitting">
-              <span class="lb-spinner" *ngIf="isSubmitting"></span>
-              <span *ngIf="!isSubmitting && activeTab === 'login'">Log in</span>
-              <span *ngIf="!isSubmitting && activeTab === 'register'">Create account</span>
+            <button type="submit" class="lb-submit" [disabled]="isSubmitting()">
+              <span class="lb-spinner" *ngIf="isSubmitting()"></span>
+              <span *ngIf="!isSubmitting() && activeTab === 'login'">Log in</span>
+              <span *ngIf="!isSubmitting() && activeTab === 'register'">Create account</span>
             </button>
           </form>
 
@@ -161,8 +161,8 @@ import { getBackendOrigin } from '../../../core/config/backend-url';
                   <input type="tel" [(ngModel)]="phone" name="phone" class="lb-input" placeholder="7XX XXX XXX" required />
                 </div>
               </div>
-              <button type="submit" class="lb-submit" [disabled]="isSubmitting">
-                {{ isSubmitting ? 'Sending code...' : 'Send reset code' }}
+              <button type="submit" class="lb-submit" [disabled]="isSubmitting()">
+                {{ isSubmitting() ? 'Sending code...' : 'Send reset code' }}
               </button>
             </form>
 
@@ -205,8 +205,8 @@ import { getBackendOrigin } from '../../../core/config/backend-url';
                 </div>
               </div>
 
-              <button type="submit" class="lb-submit" [disabled]="isSubmitting">
-                {{ isSubmitting ? 'Verifying...' : 'Reset password' }}
+              <button type="submit" class="lb-submit" [disabled]="isSubmitting()">
+                {{ isSubmitting() ? 'Verifying...' : 'Reset password' }}
               </button>
 
               <div class="lb-resend-row">
@@ -747,7 +747,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
   public termsAccepted: boolean = true;
   public showPassword: boolean = false;
   public showNewPassword: boolean = false;
-  public isSubmitting: boolean = false;
+  public readonly isSubmitting = signal(false);
   public errorMessage: string | null = null;
   public successMessage: string | null = null;
 
@@ -947,6 +947,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
   }
 
   public onSubmit() {
+    if (this.isSubmitting()) return;
     if (this.activeTab === 'login') this.onLogin();
     else if (this.activeTab === 'register') this.onRegister();
   }
@@ -962,17 +963,17 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       this.errorMessage = 'Unavailable in your region.';
       return;
     }
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     this.errorMessage = null;
     this.authService.login({ username: fullPhone, password: this.password }).subscribe({
       next: (res) => {
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         this.router.navigate(['/dashboard']);
       },
       error: (err) => {
         const errMsg = String(err?.message || '');
         if (err?.status === 403 && (errMsg.toLowerCase().includes('suspended') || (err as any)?.code === 'ACCOUNT_SUSPENDED')) {
-          this.isSubmitting = false;
+          this.isSubmitting.set(false);
           this.isSuspendedNotice = true;
           this.errorMessage = 'Your account has been suspended contact our support using the chat below to appeal';
           this.supportCategory = 'appeal';
@@ -994,11 +995,11 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
         if (isWorthRetrying && rawPhone !== fullPhone) {
           this.authService.login({ username: rawPhone, password: this.password }).subscribe({
             next: (res) => {
-              this.isSubmitting = false;
+              this.isSubmitting.set(false);
               this.router.navigate(['/dashboard']);
             },
             error: (retryErr) => {
-              this.isSubmitting = false;
+              this.isSubmitting.set(false);
               const retryMsg = String(retryErr?.message || '');
               if (retryErr?.status === 403 && (retryMsg.toLowerCase().includes('suspended') || (retryErr as any)?.code === 'ACCOUNT_SUSPENDED')) {
                 this.isSuspendedNotice = true;
@@ -1013,7 +1014,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
             }
           });
         } else {
-          this.isSubmitting = false;
+          this.isSubmitting.set(false);
           this.errorMessage = err?.message || 'Invalid phone number or password.';
         }
       }
@@ -1039,7 +1040,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       return;
     }
     const { fullPhone } = this.formatPhone(trimmed);
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     this.errorMessage = null;
     this.authService.register({ 
       username: fullPhone, 
@@ -1047,7 +1048,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       password: this.password 
     }).subscribe({
       next: (res) => {
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         this.authService.beginPhoneVerification(fullPhone, res);
         // The account already exists at this point, so never leave the player
         // stranded on the form if the router refuses to move.
@@ -1056,7 +1057,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
         }).catch(() => window.location.assign('/verify-phone'));
       },
       error: (err) => {
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         this.errorMessage = err?.message || 'Registration failed.';
       }
     });
@@ -1069,11 +1070,11 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       return;
     }
     const { fullPhone } = this.formatPhone(trimmed);
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     this.errorMessage = null;
     this.successMessage = null;
     setTimeout(() => {
-      this.isSubmitting = false;
+      this.isSubmitting.set(false);
       this.generatedOtp = '123456';
       this.successMessage = `OTP sent to ${fullPhone}!`;
       this.forgotStep = 2;
@@ -1095,11 +1096,11 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       this.errorMessage = 'Passwords do not match.';
       return;
     }
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     this.errorMessage = null;
     this.authService.resetPassword({ phone_number: fullPhone, new_password: this.newPassword }).subscribe({
       next: () => {
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         this.successMessage = 'Password reset successful! Please log in.';
         this.activeTab = 'login';
         this.forgotStep = 1;
@@ -1108,7 +1109,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
         this.otpInput = '';
       },
       error: (err) => {
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         this.errorMessage = typeof err === 'string' ? err : 'Reset failed.';
       }
     });

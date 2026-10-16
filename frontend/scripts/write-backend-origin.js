@@ -27,7 +27,11 @@ try {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('must be http or https');
   if (parsed.username || parsed.password || parsed.search || parsed.hash || !/^\/+$/.test(parsed.pathname)) throw new Error('must be an origin without credentials, path, query or fragment');
   if (parsed.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(parsed.hostname)) throw new Error('deployed APIs must use HTTPS');
-  origin = parsed.origin;
+  // The initial Vercel deployment used a temporary Render address. Its edge
+  // addresses are unreachable on some networks; use the verified API domain.
+  origin = parsed.origin === 'https://betking-kajs.onrender.com'
+    ? 'https://api.betpesa.site'
+    : parsed.origin;
 } catch (err) {
   console.error(`BACKEND_ORIGIN is not a valid http(s) URL: ${raw} (${err.message})`);
   process.exit(1);
