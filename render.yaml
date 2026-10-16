@@ -1,0 +1,68 @@
+# Render blueprint for BETKING.
+#
+# Render hosts the API only; Vercel builds and hosts the Angular frontend.
+#
+# The service must run as a single instance. The crash rounds, their timers and
+# the connected socket clients all live in this process's memory, so a second
+# instance would run its own independent round with its own multiplier and two
+# players would see different results for the same bet.
+#
+# Attach api.betking.site to this service under Settings → Custom Domains. The
+# frontend's committed default already points there, so a Vercel build with no
+# BACKEND_ORIGIN set still reaches the right API once that domain resolves.
+
+services:
+  - type: web
+    name: betking
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: npm run build:backend
+    startCommand: npm start
+    # server.js answers /healthz with 503 while MONGODB_URI, JWT_SECRET or the
+    # database itself are wrong, which is exactly when a deploy must not go
+    # live. Leave this set so a misconfigured build is rolled back instead of
+    # replacing a working one.
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.20.0
+
+      # Render assigns the port; server.js already reads it.
+      - key: PORT
+        value: 10000
+
+      # Add only this project's Vercel domains here if preview access is needed.
+      - key: CORS_ORIGIN
+        value: https://betking.site,https://www.betking.site
+
+      # Secrets: set these in the Render dashboard, never in this file.
+      - key: JWT_SECRET
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+
+      # Optional override for the existing superadmin bootstrap password.
+      - key: INITIAL_SUPERADMIN_PASSWORD
+        sync: false
+
+      # PayHero M-Pesa integration. Optional — deposits and withdrawals are the
+      # only features that need them.
+      - key: PAYHERO_BASE_URL
+        value: https://backend.payhero.co.ke/api/v2
+      - key: PAYHERO_AUTH_TOKEN
+        sync: false
+      - key: PAYHERO_API_USERNAME
+        sync: false
+      - key: PAYHERO_API_PASSWORD
+        sync: false
+      - key: PAYHERO_CHANNEL_ID
+        sync: false
+      - key: PAYHERO_CALLBACK_URL
+        sync: false
+      - key: PAYHERO_CALLBACK_TOKEN
+        sync: false
