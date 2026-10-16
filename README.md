@@ -94,6 +94,12 @@ final status, amount and receipt directly with PayHero before crediting a wallet
 If verification is unavailable, the callback returns 503 so it can be retried.
 PayHero requests continue to use the provider's own API address.
 
+Verification uses PayHero's transaction-status endpoint with the reference saved
+from payment initiation. A delayed response stays pending; a 35-second timer
+does not mean the payment failed. Background verification also recovers recent
+deposits that the old timeout marked failed. Deposit status, wallet credit and
+the corrected transaction record commit together, once per payment receipt.
+
 External M-Pesa synchronization runs only when both `MPESA_API_URL` and
 `MPESA_CONNECT_KEY` are explicitly configured. No external site endpoint or
 shared key is assumed.

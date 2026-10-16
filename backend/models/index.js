@@ -169,6 +169,7 @@ const DepositSchema = new mongoose.Schema({
   provider: { type: String, default: 'daraja' },
   external_reference: { type: String, default: null, sparse: true },
   provider_reference: { type: String, default: null },
+  provider_checked_at: { type: Date, default: null },
   payer_phone: { type: String, default: null },
   callback_payload: { type: mongoose.Schema.Types.Mixed, default: null },
   failure_reason: { type: String, default: null },

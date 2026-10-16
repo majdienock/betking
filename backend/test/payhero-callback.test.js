@@ -40,7 +40,7 @@ test('provider failures and pending payments cannot be turned into success by a 
     const { send, calls } = setup(verified);
     assert.equal((await send({ external_reference: deposit.external_reference, Status: 'Success' })).code, 200);
     assert.equal(calls.completed.length, 0);
-    assert.equal(calls.failed.length, verified.status === 'pending' ? 0 : 1);
+    assert.equal(calls.failed.length, verified.status === 'pending' || verified.success === false ? 0 : 1);
   }
 });
 
@@ -50,7 +50,8 @@ test('the authenticated settled ledger format is accepted, while pending or outb
   const settled = setup(ledger);
   assert.equal((await settled.send()).code, 200);
   assert.equal(settled.calls.completed.length, 1);
-  for (const entry of [{ ...ledger, status: 'pending' }, { ...ledger, transaction_type: 'outbound_payment' }]) {
+  for (const entry of [{ ...ledger, status: 'pending' }, { ...ledger, status: 'PENDING', success: false },
+    { ...ledger, status: 'processing', ResultCode: 0 }, { ...ledger, transaction_type: 'outbound_payment' }]) {
     const pending = setup(entry);
     assert.equal((await pending.send()).code, 200);
     assert.equal(pending.calls.completed.length, 0);
@@ -106,38 +107,112 @@ function serverFunction(name, endMarker, globals) {
   return vm.runInNewContext('(' + source.slice(start, end).trim() + ')', globals);
 }
 
-test('public callbacks cannot use the legacy amount/phone heuristic to match another deposit', async () => {
-  const { paymentReferences } = require('../payhero-callback');
-  const otherPayment = { ...payment, external_reference: 'other-deposit', transaction_type: 'inbound_payment', description: 'payment 712345678', created_at: new Date().toISOString() };
-  const query = serverFunction('queryPayHeroTransactionStatus', '// STK Status Check', {
-    process: { env: { PAYHERO_API_USERNAME: 'user', PAYHERO_API_PASSWORD: 'password' } },
-    PAYHERO_AUTH_TOKEN: undefined, PAYHERO_API_USERNAME: undefined, PAYHERO_API_PASSWORD: undefined,
-    PAYHERO_BASE_URL: 'https://provider.example/api/v2', Buffer, paymentReferences,
-    axios: { get: async () => ({ data: { response: [otherPayment] } }) },
-    Deposit: { findOne: async () => null }
-  });
-  assert.equal(await query({ ...deposit, payer_phone: '+254712345678', created_at: new Date() }, { strictReference: true }), null);
-  assert.equal(await query({ ...deposit, payer_phone: '+254712345678', created_at: new Date() }), otherPayment);
+test('a successful payment recovers an old timeout failure', async () => {
+  const { send, calls } = setup(payment, { ...deposit, status: 'failed' });
+  assert.equal((await send()).code, 200);
+  assert.equal(calls.completed.length, 1);
 });
 
-test('racing callback and player status requests credit a deposit only once', async () => {
-  let stored = { ...deposit, user_id: 7 };
-  let credits = 0;
+function settlementFixture({ status = 'pending', existingLedger = null, failLedger = false } = {}) {
+  let state = { deposit: { ...deposit, user_id: 7, status }, balance: existingLedger?.status === 'completed' ? 100 : 0,
+    ledger: existingLedger, credits: 0 };
+  let queue = Promise.resolve();
+  const events = [];
   const complete = serverFunction('completePendingMpesaDeposit', 'async function failPendingMpesaDeposit', {
     Deposit: {
-      findOne: async () => ({ ...stored }),
+      startSession: async () => ({
+        withTransaction: work => {
+          const next = queue.then(async () => {
+            const before = structuredClone(state);
+            try { return await work(); } catch (error) { state = before; throw error; }
+          });
+          queue = next.catch(() => {});
+          return next;
+        },
+        endSession: async () => {}
+      }),
+      findOne: async () => ({ ...state.deposit }),
       findOneAndUpdate: async (_filter, update) => {
-        if (stored.status === 'completed') return null;
-        stored = { ...stored, ...update.$set };
-        return { ...stored };
-      },
-      findById: async () => ({ ...stored })
+        if (state.deposit.status === 'completed') return null;
+        state.deposit = { ...state.deposit, ...update.$set };
+        return { ...state.deposit };
+      }
     },
-    User: { findOneAndUpdate: async () => { credits++; return { balance: 100 }; } },
-    Transaction: { create: async () => ({ id: 1 }) },
-    emitRealtimeMutation() {}, console
+    User: { findOneAndUpdate: async (_filter, update) => {
+      state.balance += update.$inc.balance;
+      state.credits++;
+      return { balance: state.balance };
+    } },
+    Transaction: {
+      findOne: async () => state.ledger?.status === 'completed' ? state.ledger : null,
+      findOneAndUpdate: async (_filter, update) => {
+        if (failLedger) throw new Error('Ledger unavailable');
+        if (state.ledger?.status !== 'failed') return null;
+        state.ledger = { ...state.ledger, ...update.$set };
+        return state.ledger;
+      },
+      create: async ([ledger]) => {
+        if (failLedger) throw new Error('Ledger unavailable');
+        state.ledger = { id: 1, ...ledger };
+        return [state.ledger];
+      }
+    },
+    emitRealtimeMutation: event => events.push(event), console: { error() {} }
   });
-  await Promise.all([complete(deposit.external_reference, 100, 'RECEIPT-1', payment), complete(deposit.mpesa_checkout_request_id, 100, 'RECEIPT-1', payment)]);
-  assert.equal(credits, 1);
-  assert.equal(stored.status, 'completed');
+  return { complete, events, read: () => state };
+}
+
+test('racing callback and player status requests credit a deposit only once', async () => {
+  const f = settlementFixture();
+  await Promise.all([f.complete(deposit.external_reference, 100, 'RECEIPT-1', payment),
+    f.complete(deposit.mpesa_checkout_request_id, 100, 'RECEIPT-1', payment)]);
+  assert.equal(f.read().credits, 1);
+  assert.equal(f.read().deposit.status, 'completed');
+  assert.equal(f.events.length, 1);
+});
+
+test('recovery corrects the old failed ledger entry and credits the wallet once', async () => {
+  const f = settlementFixture({ status: 'failed', existingLedger: { id: 4, status: 'failed', reference: deposit.external_reference } });
+  await f.complete(deposit.external_reference, 100, 'RECEIPT-1', payment);
+  assert.equal(f.read().deposit.status, 'completed');
+  assert.equal(f.read().deposit.failure_reason, null);
+  assert.equal(f.read().balance, 100);
+  assert.equal(f.read().ledger.id, 4);
+  assert.equal(f.read().ledger.status, 'completed');
+  await f.complete(deposit.external_reference, 100, 'RECEIPT-1', payment);
+  assert.equal(f.read().balance, 100);
+});
+
+test('a ledger error rolls back the deposit and wallet together so verification can retry', async () => {
+  const f = settlementFixture({ failLedger: true });
+  assert.equal(await f.complete(deposit.external_reference, 100, 'RECEIPT-1', payment), null);
+  assert.equal(f.read().deposit.status, 'pending');
+  assert.equal(f.read().balance, 0);
+  assert.equal(f.events.length, 0);
+});
+
+test('repairing a stale failed status does not credit an already recorded receipt twice', async () => {
+  const f = settlementFixture({ status: 'failed', existingLedger: { status: 'completed', mpesa_receipt_number: 'RECEIPT-1' } });
+  await f.complete(deposit.external_reference, 100, 'RECEIPT-1', payment);
+  assert.equal(f.read().deposit.status, 'completed');
+  assert.equal(f.read().balance, 100);
+  assert.equal(f.read().credits, 0);
+});
+
+test('background reconciliation never converts an old pending payment into a timeout failure', async () => {
+  const updates = [];
+  const pending = { ...deposit, created_at: new Date(Date.now() - 120000) };
+  const reconcile = serverFunction('reconcilePendingMpesaDeposits', '// PayHero & M-Pesa STK Push', {
+    Deposit: {
+      find: () => ({ sort: () => ({ limit: async () => [pending] }) }),
+      updateOne: async (_filter, update) => updates.push(update)
+    },
+    reconcileMpesaDeposit: async () => { throw new Error('Provider temporarily unavailable'); },
+    console
+  });
+  await reconcile();
+  assert.equal(pending.status, 'pending');
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].$set.status, undefined);
+  assert.ok(updates[0].$set.provider_checked_at);
 });

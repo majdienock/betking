@@ -5,7 +5,7 @@ function paymentReferences(payment = {}) {
     .filter(value => typeof value === 'string' && value.length > 0 && value.length <= 256);
 }
 
-function createPayHeroCallbackHandler({ Deposit, queryTransaction, completeDeposit, failDeposit }) {
+function createPayHeroDepositReconciler({ queryTransaction, completeDeposit, failDeposit }) {
   const inFlight = new Map();
 
   async function reconcile(deposit) {
@@ -18,18 +18,20 @@ function createPayHeroCallbackHandler({ Deposit, queryTransaction, completeDepos
 
     const status = String(payment.status || payment.Status || '').toLowerCase();
     const resultCode = payment.ResultCode;
-    const failed = payment.success === false || ['failed', 'cancelled', 'canceled', 'rejected'].includes(status)
-      || (resultCode !== undefined && resultCode !== null && String(resultCode) !== '0');
+    const pending = ['pending', 'queued', 'processing', 'initiated', 'accepted', 'waiting'].includes(status);
+    const failed = !pending && (['failed', 'failure', 'cancelled', 'canceled', 'rejected'].includes(status)
+      || (resultCode !== undefined && resultCode !== null && String(resultCode) !== '0'));
     // PayHero's settled transaction ledger has transaction_type and a receipt,
     // but no status field. An explicitly pending status must still stay pending.
     const settledInbound = !status && resultCode == null && payment.transaction_type === 'inbound_payment';
-    const succeeded = !failed && (['success', 'completed', 'complete'].includes(status)
+    const succeeded = !failed && !pending && payment.success !== false && (['success', 'completed', 'complete'].includes(status)
       || resultCode === 0 || resultCode === '0' || settledInbound);
     const ref = deposit.external_reference || deposit.mpesa_checkout_request_id;
 
     if (failed) {
       const result = await failDeposit(ref, payment.status_reason || payment.ResultDesc || 'Payment failed', payment);
       if (!result) throw new Error('Payment update unavailable');
+      return result;
     } else if (succeeded) {
       const amount = Number(payment.amount ?? payment.Amount);
       const receipt = payment.provider_reference || payment.mpesa_reference || payment.MpesaReceiptNumber || payment.receipt;
@@ -37,9 +39,25 @@ function createPayHeroCallbackHandler({ Deposit, queryTransaction, completeDepos
         || typeof receipt !== 'string' || !receipt.trim()) throw new Error('Payment details mismatch');
       const result = await completeDeposit(ref, amount, receipt, payment);
       if (!result) throw new Error('Payment update unavailable');
+      return result;
     }
+    return deposit;
   }
 
+  return deposit => {
+    if (deposit.status === 'completed') return Promise.resolve(deposit);
+    const key = String(deposit._id || deposit.id || deposit.external_reference);
+    let work = inFlight.get(key);
+    if (!work) {
+      work = reconcile(deposit).finally(() => inFlight.delete(key));
+      inFlight.set(key, work);
+    }
+    return work;
+  };
+}
+
+function createPayHeroCallbackHandler({ Deposit, reconcileDeposit, ...dependencies }) {
+  const reconcile = reconcileDeposit || createPayHeroDepositReconciler(dependencies);
   return async (req, res) => {
     try {
       const payload = req.body || {};
@@ -51,13 +69,7 @@ function createPayHeroCallbackHandler({ Deposit, queryTransaction, completeDepos
         { provider_reference: { $in: references } }
       ] });
       if (deposit && deposit.status !== 'completed') {
-        const key = String(deposit._id || deposit.id || deposit.external_reference);
-        let work = inFlight.get(key);
-        if (!work) {
-          work = reconcile(deposit).finally(() => inFlight.delete(key));
-          inFlight.set(key, work);
-        }
-        await work;
+        await reconcile(deposit);
       }
       return res.status(200).json({ status: true, message: 'Callback processed' });
     } catch (error) {
@@ -67,4 +79,4 @@ function createPayHeroCallbackHandler({ Deposit, queryTransaction, completeDepos
   };
 }
 
-module.exports = { createPayHeroCallbackHandler, paymentReferences };
+module.exports = { createPayHeroCallbackHandler, createPayHeroDepositReconciler, paymentReferences };
