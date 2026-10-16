@@ -63,18 +63,5 @@
         }
       ]
     }
-  ],
-  "redirects": [
-    {
-      "source": "/:path*",
-      "has": [
-        {
-          "type": "host",
-          "value": "www.betpesa.site"
-        }
-      ],
-      "destination": "https://betpesa.site/:path*",
-      "permanent": true
-    }
   ]
 }

@@ -55,8 +55,9 @@ build default: removing a temporary override restores the canonical API. All API
 requests and player/admin sockets use this origin. MongoDB, JWT and payment
 secrets belong only on Render.
 
-Add `betpesa.site` and `www.betpesa.site` in **Settings → Domains**. Set `www` to
-redirect to `https://betpesa.site`. Use the exact DNS records Vercel shows. Before
+Add `betpesa.site` and `www.betpesa.site` in **Settings → Domains**. Configure
+the preferred domain and its redirect there; the project has no competing domain
+redirects. Use the exact DNS records Vercel shows. Before
 the API domain resolves, a temporary `BACKEND_ORIGIN` may point to this new
 service's Render URL; redeploy Vercel after changing it. Add any project's exact
 Vercel origin to Render's `CORS_ORIGIN` if it needs access. Other Vercel projects
