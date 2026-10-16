@@ -89,9 +89,10 @@ Keep the approved existing PayHero account credentials on Render: `PAYHERO_AUTH_
 `PAYHERO_API_USERNAME` and `PAYHERO_API_PASSWORD`, plus `PAYHERO_CHANNEL_ID`.
 The private environment file contains the authorized shared payment setup.
 
-Keep the existing `PAYHERO_CALLBACK_TOKEN`. Set `PAYHERO_CALLBACK_URL`
-to `https://api.betpesa.site/api/mpesa/callback?token=<URL-encoded-secret>` using
-that same secret. Production rejects callbacks without the configured token.
+Set `PAYHERO_CALLBACK_URL` to `https://api.betpesa.site/api/mpesa/callback`.
+No callback token is required. The backend verifies the payment's reference,
+final status, amount and receipt directly with PayHero before crediting a wallet.
+If verification is unavailable, the callback returns 503 so it can be retried.
 PayHero requests continue to use the provider's own API address.
 
 External M-Pesa synchronization runs only when both `MPESA_API_URL` and

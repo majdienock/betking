@@ -17,6 +17,7 @@ const axios = require('axios');
 const { createRealtimeEmitter, adminSocketAccessError, revokeAdminSockets } = require('./realtime');
 const { userSearchConditions } = require('./user-search');
 const { createPayHeroBalanceFetcher } = require('./payhero-balance');
+const { createPayHeroCallbackHandler, paymentReferences } = require('./payhero-callback');
 const { createOnlinePlayers } = require('./online-players');
 const { createAdminPrivacy, ADMIN_TAGS, adminClientScope, adminTicketScope } = require('./admin-privacy');
 const privacyModels = require('./models');
@@ -80,7 +81,6 @@ const PAYHERO_API_USERNAME = process.env.PAYHERO_API_USERNAME;
 const PAYHERO_API_PASSWORD = process.env.PAYHERO_API_PASSWORD;
 const PAYHERO_CHANNEL_ID = process.env.PAYHERO_CHANNEL_ID;
 const PAYHERO_CALLBACK_URL = process.env.PAYHERO_CALLBACK_URL;
-const PAYHERO_CALLBACK_TOKEN = process.env.PAYHERO_CALLBACK_TOKEN;
 
 // ---------- MONGODB CONNECTION ----------
 let observedUserCount = null;
@@ -1433,7 +1433,7 @@ app.get('/api/user/sessions', authenticateToken, async (req, res) => {
 // ---------- PAYHERO M-PESA & DEPOSIT HELPERS ----------
 async function completePendingMpesaDeposit(externalRef, amount, receiptNumber, callbackPayload, secondaryRef = null) {
   try {
-    const deposit = await Deposit.findOne({
+    let deposit = await Deposit.findOne({
       $or: [
         { external_reference: externalRef },
         { mpesa_checkout_request_id: externalRef },
@@ -1444,12 +1444,18 @@ async function completePendingMpesaDeposit(externalRef, amount, receiptNumber, c
     if (!deposit) return null;
     if (deposit.status === 'completed') return deposit;
 
-    deposit.status = 'completed';
-    deposit.amount = amount || deposit.amount;
-    deposit.mpesa_receipt_number = receiptNumber || deposit.mpesa_receipt_number;
-    deposit.callback_payload = callbackPayload;
-    deposit.updated_at = new Date();
-    await deposit.save();
+    // Only one callback/status request may claim this deposit for crediting.
+    const claimed = await Deposit.findOneAndUpdate(
+      { _id: deposit._id, status: { $ne: 'completed' } },
+      { $set: {
+        status: 'completed', amount: amount || deposit.amount,
+        mpesa_receipt_number: receiptNumber || deposit.mpesa_receipt_number,
+        callback_payload: callbackPayload, updated_at: new Date()
+      } },
+      { new: true }
+    );
+    if (!claimed) return await Deposit.findById(deposit._id);
+    deposit = claimed;
 
     const user = await User.findOneAndUpdate(
       { id: deposit.user_id },
@@ -1649,8 +1655,9 @@ app.post([
           timeout: 10000
         });
 
-        if (payheroRes.data?.CheckoutRequestID) {
-          deposit.mpesa_checkout_request_id = payheroRes.data.CheckoutRequestID;
+        if (payheroRes.data?.CheckoutRequestID || payheroRes.data?.reference) {
+          if (payheroRes.data.CheckoutRequestID) deposit.mpesa_checkout_request_id = payheroRes.data.CheckoutRequestID;
+          if (typeof payheroRes.data.reference === 'string') deposit.provider_reference = payheroRes.data.reference;
           await deposit.save();
         }
 
@@ -1683,56 +1690,16 @@ app.post([
   }
 });
 
-// Anyone on the internet can POST to the callback route below, and that route
-// credits wallets — a forged "Success" payload is free money. PAYHERO_CALLBACK_TOKEN
-// is the shared secret that separates PayHero's callbacks from everyone else's.
-//
-// Production callbacks require this secret. Append "?token=<value>" to
-// PAYHERO_CALLBACK_URL, or have PayHero send it as a bearer token.
-function isAuthenticPayHeroCallback(req) {
-  if (!PAYHERO_CALLBACK_TOKEN) return process.env.NODE_ENV !== 'production';
+// No callback token is required. Confirm payment with authenticated PayHero
+// transaction data before changing any deposit or wallet.
+app.post(['/api/payhero/callback', '/api/mpesa/callback'], createPayHeroCallbackHandler({
+  Deposit,
+  queryTransaction: queryPayHeroTransactionStatus,
+  completeDeposit: completePendingMpesaDeposit,
+  failDeposit: failPendingMpesaDeposit
+}));
 
-  const header = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-  const supplied = header || String(req.query.token || '').trim();
-  if (!supplied) return false;
-
-  // Compare in constant time: a plain === leaks the token one character at a
-  // time to anyone willing to measure the response.
-  const expected = Buffer.from(PAYHERO_CALLBACK_TOKEN);
-  const actual = Buffer.from(supplied);
-  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-}
-
-// PayHero STK Callback (Handles exact PayHero nested response format)
-app.post(['/api/payhero/callback', '/api/mpesa/callback'], async (req, res) => {
-  try {
-    if (!isAuthenticPayHeroCallback(req)) {
-      console.warn(`Rejected M-Pesa callback with a missing or wrong token from ${req.ip}.`);
-      return res.status(401).json({ status: false, message: 'Unauthorized' });
-    }
-
-    const payload = req.body || {};
-    const resp = payload.response || payload;
-    const ref = resp.ExternalReference || resp.external_reference || resp.CheckoutRequestID || resp.checkout_request_id || resp.MerchantRequestID || payload.external_reference || payload.CheckoutRequestID;
-    const isSuccess = (resp.Status === 'Success' || resp.Status === 'SUCCESS' || resp.status === 'Success' || resp.status === 'SUCCESS' || resp.ResultCode === 0 || resp.ResultCode === '0') && (payload.status !== false);
-    const amount = parseFloat(resp.Amount || resp.amount || payload.Amount || payload.amount || 0);
-    const receipt = resp.MpesaReceiptNumber || resp.mpesa_reference || resp.receipt || payload.MpesaReceiptNumber || payload.mpesa_reference;
-    const failureReason = resp.ResultDesc || resp.status_reason || resp.Status || 'Payment failed or was cancelled';
-
-    if (ref) {
-      if (isSuccess) {
-        await completePendingMpesaDeposit(ref, amount, receipt, payload);
-      } else {
-        await failPendingMpesaDeposit(ref, failureReason, payload);
-      }
-    }
-    return res.status(200).json({ status: true, message: 'Callback processed' });
-  } catch (err) {
-    return res.status(500).json({ status: false, message: 'Callback error' });
-  }
-});
-
-async function queryPayHeroTransactionStatus(deposit) {
+async function queryPayHeroTransactionStatus(deposit, { strictReference = false } = {}) {
   const authToken = process.env.PAYHERO_AUTH_TOKEN || PAYHERO_AUTH_TOKEN;
   const apiUser = process.env.PAYHERO_API_USERNAME || PAYHERO_API_USERNAME;
   const apiPass = process.env.PAYHERO_API_PASSWORD || PAYHERO_API_PASSWORD;
@@ -1762,14 +1729,11 @@ async function queryPayHeroTransactionStatus(deposit) {
     if (Array.isArray(list) && list.length > 0) {
       for (const t of list) {
         // Strict match on external reference or checkout request ID
-        const refMatch = (
-          (t.external_reference && (t.external_reference === externalRef || t.external_reference === checkoutRequestId)) ||
-          (t.ExternalReference && (t.ExternalReference === externalRef || t.ExternalReference === checkoutRequestId)) ||
-          (t.CheckoutRequestID && (t.CheckoutRequestID === checkoutRequestId || t.CheckoutRequestID === externalRef)) ||
-          (t.checkout_request_id && (t.checkout_request_id === checkoutRequestId || t.checkout_request_id === externalRef))
-        );
+        const expectedRefs = [externalRef, checkoutRequestId, deposit.provider_reference].filter(Boolean);
+        const refMatch = paymentReferences(t).some(ref => expectedRefs.includes(ref));
 
         if (refMatch) return t;
+        if (strictReference) continue;
 
         // Or fresh inbound payment created strictly AFTER this deposit was requested
         if (t.transaction_type === 'inbound_payment' && Math.abs(parseFloat(t.amount) - deposit.amount) < 0.01) {
