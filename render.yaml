@@ -38,7 +38,7 @@ services:
 
       # Add only this project's Vercel domains here if preview access is needed.
       - key: CORS_ORIGIN
-        value: https://betpesa.site,https://www.betpesa.site
+        value: https://betpesa.site,https://www.betpesa.site,https://betking-beta.vercel.app
 
       # Secrets: set these in the Render dashboard, never in this file.
       - key: JWT_SECRET

@@ -126,7 +126,8 @@ const defaultCorsOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   'https://betpesa.site',
-  'https://www.betpesa.site'
+  'https://www.betpesa.site',
+  'https://betking-beta.vercel.app'
 ];
 const envCorsOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')

@@ -24,7 +24,7 @@ Set these variables in Render's Environment panel:
 | `NODE_ENV` | `production` (in blueprint) |
 | `MONGODB_URI` | Keep the existing connection string and database name to retain current accounts |
 | `JWT_SECRET` | Keep the existing private secret |
-| `CORS_ORIGIN` | `https://betpesa.site,https://www.betpesa.site` (in blueprint) |
+| `CORS_ORIGIN` | `https://betpesa.site,https://www.betpesa.site,https://betking-beta.vercel.app` (in blueprint) |
 | `INITIAL_SUPERADMIN_PASSWORD` | Optional existing bootstrap password override; only used for an empty database |
 
 This branding change does not migrate or rename the existing database. MongoDB
@@ -36,8 +36,8 @@ Startup never resets existing accounts or passwords. An empty database creates t
 same initial superadmin as the source app. Passwords are no longer printed in
 startup logs.
 
-The existing backend is `https://betking-kajs.onrender.com`. Keep using this
-address until the custom API domain is attached and its DNS resolves.
+The backend is reachable at `https://api.betpesa.site` and its original
+Render address, `https://betking-kajs.onrender.com`.
 
 Attach `api.betpesa.site` under Render's **Settings → Custom Domains**, and add
 the DNS record Render shows. Keep one backend instance: game rounds and timers
@@ -50,9 +50,7 @@ The root `vercel.json` supplies install/build commands, SPA routes and output
 `frontend/dist/frontend/browser`. Selecting `frontend` as root is also supported
 by its own `vercel.json`.
 
-For the current deployment, set
-`BACKEND_ORIGIN=https://betking-kajs.onrender.com` in Vercel. Once the custom API
-domain resolves, switch it to `https://api.betpesa.site`. This is also the clean
+Set `BACKEND_ORIGIN=https://api.betpesa.site` in Vercel. This is also the clean
 build default: removing a temporary override restores the canonical API. All API
 requests and player/admin sockets use this origin. MongoDB, JWT and payment
 secrets belong only on Render.
