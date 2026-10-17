@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, computed, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -732,6 +732,7 @@ import { getBackendOrigin } from '../../../core/config/backend-url';
   `]
 })
 export class AuthLandingComponent implements OnInit, OnDestroy {
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly authService = inject(AuthService);
   private readonly router = inject(Router);
   private readonly sanitizedModeService = inject(SanitizedModeService);
@@ -830,6 +831,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
           }
           allMsgs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
           this.supportMessages = allMsgs;
+          this.cdr.detectChanges();
         }
       },
       error: () => {}
@@ -869,11 +871,16 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
             created_at: new Date().toISOString()
           });
         }
-        setTimeout(() => { this.supportStatusMsg = null; }, 5000);
+        this.cdr.detectChanges();
+        setTimeout(() => {
+          this.supportStatusMsg = null;
+          this.cdr.detectChanges();
+        }, 5000);
       },
       error: (err) => {
         this.isSendingSupport = false;
         this.supportStatusMsg = err?.error?.error || 'Failed to send message. Please retry.';
+        this.cdr.detectChanges();
       }
     });
   }
@@ -947,6 +954,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
   }
 
   public onSubmit() {
+    if (this.isSubmitting) return;
     if (this.activeTab === 'login') this.onLogin();
     else if (this.activeTab === 'register') this.onRegister();
   }
@@ -967,7 +975,10 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
     this.authService.login({ username: fullPhone, password: this.password }).subscribe({
       next: (res) => {
         this.isSubmitting = false;
-        this.router.navigate(['/dashboard']);
+        this.cdr.detectChanges();
+        this.router.navigate(['/dashboard']).then((navigated) => {
+          if (!navigated) window.location.assign('/dashboard');
+        }).catch(() => window.location.assign('/dashboard'));
       },
       error: (err) => {
         const errMsg = String(err?.message || '');
@@ -978,6 +989,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
           this.supportCategory = 'appeal';
           this.supportPhone = this.phone;
           this.isSupportExpanded = true;
+          this.cdr.detectChanges();
           this.loadSupportMessages();
           setTimeout(() => {
             const el = document.getElementById('support-chat');
@@ -995,7 +1007,10 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
           this.authService.login({ username: rawPhone, password: this.password }).subscribe({
             next: (res) => {
               this.isSubmitting = false;
-              this.router.navigate(['/dashboard']);
+              this.cdr.detectChanges();
+              this.router.navigate(['/dashboard']).then((navigated) => {
+                if (!navigated) window.location.assign('/dashboard');
+              }).catch(() => window.location.assign('/dashboard'));
             },
             error: (retryErr) => {
               this.isSubmitting = false;
@@ -1006,15 +1021,18 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
                 this.supportCategory = 'appeal';
                 this.supportPhone = this.phone;
                 this.isSupportExpanded = true;
+                this.cdr.detectChanges();
                 this.loadSupportMessages();
                 return;
               }
               this.errorMessage = retryErr?.message || 'Invalid phone number or password.';
+              this.cdr.detectChanges();
             }
           });
         } else {
           this.isSubmitting = false;
           this.errorMessage = err?.message || 'Invalid phone number or password.';
+          this.cdr.detectChanges();
         }
       }
     });
@@ -1048,6 +1066,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
     }).subscribe({
       next: (res) => {
         this.isSubmitting = false;
+        this.cdr.detectChanges();
         this.authService.beginPhoneVerification(fullPhone, res);
         // The account already exists at this point, so never leave the player
         // stranded on the form if the router refuses to move.
@@ -1058,6 +1077,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       error: (err) => {
         this.isSubmitting = false;
         this.errorMessage = err?.message || 'Registration failed.';
+        this.cdr.detectChanges();
       }
     });
   }
@@ -1077,6 +1097,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       this.generatedOtp = '123456';
       this.successMessage = `OTP sent to ${fullPhone}!`;
       this.forgotStep = 2;
+      this.cdr.detectChanges();
     }, 800);
   }
 
@@ -1106,10 +1127,12 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
         this.newPassword = '';
         this.confirmNewPassword = '';
         this.otpInput = '';
+        this.cdr.detectChanges();
       },
       error: (err) => {
         this.isSubmitting = false;
         this.errorMessage = typeof err === 'string' ? err : 'Reset failed.';
+        this.cdr.detectChanges();
       }
     });
   }

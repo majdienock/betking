@@ -32,7 +32,9 @@ let origin;
 try {
   const parsed = new URL(raw);
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('must be http or https');
-  origin = parsed.origin;
+  origin = parsed.origin === 'https://betking-kajs.onrender.com'
+    ? 'https://api.betpesa.site'
+    : parsed.origin;
 } catch (err) {
   console.error(`BACKEND_ORIGIN is not a valid http(s) URL: ${raw} (${err.message})`);
   process.exit(1);
