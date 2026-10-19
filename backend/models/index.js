@@ -400,6 +400,9 @@ const CryptoSettingSchema = new mongoose.Schema({
   _id: { type: String, default: 'trust_wallet' },
   enabled: { type: Boolean, default: false },
   receiving_address: { type: String, default: '' },
+  withdrawals_enabled: { type: Boolean, default: false },
+  conversion_enabled: { type: Boolean, default: false },
+  usd_kes_rate_micros: { type: Number, default: 0, min: 0 },
   updated_by: Number,
   updated_at: { type: Date, default: Date.now }
 });
@@ -421,7 +424,37 @@ CryptoDepositSchema.index({ transaction_hash: 1 }, { unique: true, sparse: true 
 CryptoDepositSchema.index({ user_id: 1, created_at: -1 });
 CryptoDepositSchema.index({ status: 1, created_at: -1 });
 
+const CryptoWithdrawalSchema = new mongoose.Schema({
+  user_id: { type: Number, required: true },
+  request_key: { type: String, required: true },
+  receiving_address: { type: String, required: true },
+  usd_cents: { type: Number, required: true, min: 1 },
+  token_amount: { type: String, required: true },
+  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+  transaction_hash: String,
+  review_note: { type: String, default: '' },
+  reviewed_by: Number,
+  created_at: { type: Date, default: Date.now },
+  reviewed_at: Date
+});
+CryptoWithdrawalSchema.index({ user_id: 1, request_key: 1 }, { unique: true });
+CryptoWithdrawalSchema.index({ transaction_hash: 1 }, { unique: true, sparse: true });
+CryptoWithdrawalSchema.index({ user_id: 1, created_at: -1 });
+const CryptoConversionSchema = new mongoose.Schema({
+  user_id: { type: Number, required: true },
+  request_key: { type: String, required: true },
+  direction: { type: String, enum: ['usd_to_kes', 'kes_to_usd'], required: true },
+  source_cents: { type: Number, required: true },
+  target_cents: { type: Number, required: true },
+  rate_micros: { type: Number, required: true },
+  created_at: { type: Date, default: Date.now }
+});
+CryptoConversionSchema.index({ user_id: 1, request_key: 1 }, { unique: true });
+CryptoConversionSchema.index({ user_id: 1, created_at: -1 });
+
 module.exports = {
+  CryptoWithdrawal: mongoose.models.CryptoWithdrawal || mongoose.model('CryptoWithdrawal', CryptoWithdrawalSchema),
+  CryptoConversion: mongoose.models.CryptoConversion || mongoose.model('CryptoConversion', CryptoConversionSchema),
   CryptoSetting: mongoose.models.CryptoSetting || mongoose.model('CryptoSetting', CryptoSettingSchema),
   CryptoDeposit: mongoose.models.CryptoDeposit || mongoose.model('CryptoDeposit', CryptoDepositSchema),
   AdminPhoneOwner: mongoose.models.AdminPhoneOwner || mongoose.model('AdminPhoneOwner', AdminPhoneOwnerSchema),

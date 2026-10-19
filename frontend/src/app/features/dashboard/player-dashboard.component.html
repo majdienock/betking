@@ -508,6 +508,7 @@
       </button>
 
       <p class="deposit-notice warn" *ngIf="withdrawNotice()">{{ withdrawNotice() }}</p>
+      <app-crypto-wallet startTab="withdraw"></app-crypto-wallet>
       <p class="modal-switch-link" (click)="openSupport('withdrawal')">Need help withdrawing? Contact Support</p>
     </section>
   </div>

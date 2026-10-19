@@ -9,6 +9,10 @@ h3 { margin: 3px 0; font-size: 22px; } h4 { margin: 14px 0 8px; } p { margin: 10
 .muted, small { color: #52655e; font-size: 12px; }
 label { display: block; margin: 12px 0; font-weight: 600; }
 input:not([type=checkbox]), textarea { display: block; width: 100%; min-width: 0; margin-top: 5px; padding: 11px 12px; border: 1px solid #adc7ba; border-radius: 8px; background: #fff; color: #172b25; font: inherit; }
+select { width: 100%; padding: 11px; margin-top: 5px; border: 1px solid #adc7ba; border-radius: 8px; background: white; color: #172b25; }
+.crypto-tabs { display: flex; gap: 6px; margin: 16px 0; }
+.crypto-tabs button { flex: 1; background: #e1ede6; color: #164e35; padding: 10px 5px; }
+.crypto-tabs button.selected { background: #107c4d; color: white; }
 button { border: 0; border-radius: 8px; padding: 10px 15px; background: #107c4d; color: white; font: 600 13px 'Segoe UI', sans-serif; cursor: pointer; }
 button:disabled { opacity: .55; cursor: wait; } button.secondary { background: #e1ede6; color: #164e35; margin: 7px 0; }
 button.reject { background: #973333; margin-left: 8px; }

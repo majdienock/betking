@@ -9,6 +9,10 @@ export interface CryptoSettings {
   asset: string;
   network: string;
   currency: string;
+  withdrawals_enabled: boolean;
+  conversion_enabled: boolean;
+  usd_kes_rate: number;
+  usd_kes_rate_micros: number;
 }
 export interface CryptoDeposit {
   id: string;
@@ -23,8 +27,18 @@ export interface CryptoDeposit {
 }
 export interface CryptoWallet {
   usd_balance: number;
+  kes_balance: number;
   settings: CryptoSettings;
   deposits: CryptoDeposit[];
+  withdrawals: CryptoWithdrawal[];
+  conversions: CryptoConversion[];
+}
+export interface CryptoWithdrawal {
+  id: string; user_id: number; receiving_address: string; usd_amount: number; token_amount: string;
+  status: string; transaction_hash?: string; review_note: string; created_at: string;
+}
+export interface CryptoConversion {
+  id: string; direction: string; source_amount: number; target_amount: number; rate: number; created_at: string;
 }
 @Injectable({ providedIn: 'root' })
 export class CryptoApiService {
@@ -40,5 +54,17 @@ export class CryptoApiService {
   deposits() { return this.http.get<{ deposits: CryptoDeposit[] }>(`${this.base}/admin/crypto/deposits`, this.options); }
   review(id: string, action: string, amount: string, note: string) {
     return this.http.post(`${this.base}/admin/crypto/deposits/${id}/review`, { action, usd_amount: amount, note }, this.options);
+  }
+  withdraw(amount: string, address: string, key: string) {
+    return this.http.post(`${this.base}/crypto/withdrawals`, { usd_amount: amount, receiving_address: address, request_key: key }, this.options);
+  }
+  convert(amount: string, direction: string, rate: number, key: string) {
+    return this.http.post<{ balance: number; usd_balance: number }>(`${this.base}/crypto/conversions`, {
+      amount, direction, expected_rate_micros: rate, request_key: key
+    }, this.options);
+  }
+  withdrawals() { return this.http.get<{ withdrawals: CryptoWithdrawal[] }>(`${this.base}/admin/crypto/withdrawals`, this.options); }
+  reviewWithdrawal(id: string, action: string, hash: string, note: string) {
+    return this.http.post(`${this.base}/admin/crypto/withdrawals/${id}/review`, { action, transaction_hash: hash, note }, this.options);
   }
 }

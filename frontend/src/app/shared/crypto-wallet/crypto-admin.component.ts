@@ -3,22 +3,23 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
-import { CryptoApiService, CryptoDeposit, CryptoSettings } from './crypto-api.service';
+import { CryptoApiService, CryptoDeposit, CryptoSettings, CryptoWithdrawal } from './crypto-api.service';
 import { AdminPinService } from '../../core/services/admin-pin.service';
 
 @Component({
   selector: 'app-crypto-admin', standalone: true, imports: [CommonModule, FormsModule],
   template: `
     <section class="crypto-card">
-      <span class="eyebrow">TRUST WALLET · USDT · BEP-20</span><h3>Crypto deposits & USD wallet</h3>
-      <p>Copy your USDT receiving address from Trust Wallet on BNB Smart Chain. Players receive separate USD wallet credits after your verification.</p>
+      <span class="eyebrow">TRUST WALLET · USDT · BEP-20</span><h3>Crypto wallet settings</h3>
       <ng-container *ngIf="settingsLoaded()">
         <label>Trust Wallet receiving address<input type="text" [(ngModel)]="settings.receiving_address" placeholder="0x…" autocomplete="off" [disabled]="saving()"></label>
         <label><input type="checkbox" [(ngModel)]="settings.enabled" [disabled]="saving()"> Enable USDT deposits on BEP-20</label>
+        <label><input type="checkbox" [(ngModel)]="settings.withdrawals_enabled" [disabled]="saving()"> Enable USDT withdrawals</label>
+        <label><input type="checkbox" [(ngModel)]="settings.conversion_enabled" [disabled]="saving()"> Enable USD/KES conversion</label>
+        <label>1 USD = KES<input type="number" min="0.000001" max="1000000" step="0.000001" [(ngModel)]="settings.usd_kes_rate" [disabled]="saving()"></label>
         <button type="button" (click)="save()" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save crypto settings' }}</button>
       </ng-container>
       <div class="history-heading"><h4>Crypto deposit requests</h4><button class="secondary" type="button" (click)="loadDeposits()">Refresh requests</button></div>
-      <p class="muted">Check the successful token transfer, USDT asset, BEP-20 network, receiving address, amount and confirmations in Trust Wallet or BscScan. Enter its confirmed USD value to approve. Each transaction can be credited once.</p>
       <p *ngIf="!deposits().length">No crypto requests found.</p>
       <article *ngFor="let deposit of deposits()" class="deposit-row">
         <div><strong>Player #{{ deposit.user_id }} · {{ deposit.token_amount }} USDT</strong><span class="status">{{ deposit.status }}</span></div>
@@ -34,6 +35,20 @@ import { AdminPinService } from '../../core/services/admin-pin.service';
           <button type="button" class="reject" (click)="review(deposit, 'reject')" [disabled]="reviewing() !== ''">Reject</button>
         </ng-container>
       </article>
+      <div class="history-heading"><h4>USDT withdrawals</h4><button type="button" class="secondary" (click)="loadWithdrawals()">Refresh</button></div>
+      <article *ngFor="let withdrawal of withdrawals()" class="deposit-row">
+        <strong>Player #{{ withdrawal.user_id }} · {{ withdrawal.token_amount }} USDT</strong>
+        <span class="status">{{ withdrawal.status }}</span><small>{{ withdrawal.created_at | date:'short' }}</small>
+        <code>{{ withdrawal.receiving_address }}</code>
+        <a *ngIf="withdrawal.transaction_hash" [href]="'https://bscscan.com/tx/' + withdrawal.transaction_hash" target="_blank" rel="noopener noreferrer">View payout</a>
+        <p *ngIf="withdrawal.review_note">{{ withdrawal.review_note }}</p>
+        <ng-container *ngIf="withdrawal.status === 'pending'">
+          <label>Payout transaction hash<input type="text" [(ngModel)]="payoutHashes[withdrawal.id]" placeholder="0x…" [disabled]="reviewing() !== ''"></label>
+          <label>Review note<textarea [(ngModel)]="notes[withdrawal.id]" maxlength="500" [disabled]="reviewing() !== ''"></textarea></label>
+          <button type="button" (click)="reviewWithdrawal(withdrawal, 'complete')" [disabled]="reviewing() !== ''">Confirm sent payout</button>
+          <button type="button" class="reject" (click)="reviewWithdrawal(withdrawal, 'reject')" [disabled]="reviewing() !== ''">Reject & refund</button>
+        </ng-container>
+      </article>
       <p *ngIf="message()" class="message" role="status">{{ message() }}</p>
     </section>
   `,
@@ -43,19 +58,23 @@ export class CryptoAdminComponent {
   private api = inject(CryptoApiService);
   private destroyRef = inject(DestroyRef);
   private pin = inject(AdminPinService);
-  settings: CryptoSettings = { enabled: false, receiving_address: '', asset: 'USDT', network: 'BEP-20', currency: 'USD' };
+  settings: CryptoSettings = { enabled: false, receiving_address: '', asset: 'USDT', network: 'BEP-20', currency: 'USD',
+    withdrawals_enabled: false, conversion_enabled: false, usd_kes_rate: 0, usd_kes_rate_micros: 0 };
   settingsLoaded = signal(false);
   saving = signal(false);
   reviewing = signal('');
   deposits = signal<CryptoDeposit[]>([]);
+  withdrawals = signal<CryptoWithdrawal[]>([]);
+  payoutHashes: Record<string, string> = {};
   message = signal('');
   amounts: Record<string, string> = {};
   notes: Record<string, string> = {};
   constructor() {
     this.loadSettings();
-    timer(0, 10000).pipe(takeUntilDestroyed()).subscribe(() => this.loadDeposits());
+    timer(10000, 10000).pipe(takeUntilDestroyed()).subscribe(() => { this.loadDeposits(); this.loadWithdrawals(); });
     this.pin.changed$.pipe(takeUntilDestroyed()).subscribe(() => {
-      this.deposits.set([]); this.amounts = {}; this.notes = {}; this.loadDeposits();
+      this.deposits.set([]); this.withdrawals.set([]); this.amounts = {}; this.notes = {}; this.payoutHashes = {};
+      this.reviewing.set(''); this.loadDeposits(); this.loadWithdrawals();
     });
   }
   loadSettings() {
@@ -69,6 +88,21 @@ export class CryptoAdminComponent {
       next: result => this.deposits.set(result.deposits),
       error: error => this.message.set(error?.error?.error || 'Unable to load crypto requests.')
     });
+  }
+  loadWithdrawals() {
+    this.api.withdrawals().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: result => this.withdrawals.set(result.withdrawals),
+      error: error => this.message.set(error?.error?.error || 'Unable to load withdrawals.')
+    });
+  }
+  reviewWithdrawal(withdrawal: CryptoWithdrawal, action: string) {
+    if (this.reviewing()) return;
+    this.reviewing.set(withdrawal.id); this.message.set('');
+    this.api.reviewWithdrawal(withdrawal.id, action, this.payoutHashes[withdrawal.id] || '', this.notes[withdrawal.id] || '')
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: () => { this.reviewing.set(''); this.message.set(action === 'complete' ? 'Payout confirmed.' : 'Withdrawal refunded.'); this.loadWithdrawals(); },
+        error: error => { this.reviewing.set(''); this.message.set(error?.error?.error || 'Unable to review withdrawal.'); }
+      });
   }
   save() {
     if (this.saving()) return;

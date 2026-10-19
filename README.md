@@ -24,7 +24,7 @@ Provider endpoint and integration-key values are read from the private
 MPESA_API_URL and MPESA_CONNECT_KEY environment variables instead of publishing
 credentials in source code. The configured integration is the approved original setup.
 
-No DNS edits, new payment modules, automatic backend-address rewrites, or
+No DNS edits, automatic backend-address rewrites, or
 replacement authentication flow are part of this restoration.
 
 ## Crypto deposits
@@ -41,10 +41,15 @@ the request. No blockchain polling or automatic crediting is enabled. Rejected
 requests retain their hash so the same transfer cannot be reused. Each request
 keeps the receiving address it was issued with, including after an address change.
 
-The separate USD wallet uses integer cents and does not affect KES balances,
-betting, M-Pesa payments or existing KES reports. It currently supports deposits
-only; USD betting, withdrawals and conversion are not included. Approval and USD
-credit commit together in a MongoDB transaction, so MongoDB must support
+The USD wallet uses integer cents. Admins can enable USDT BEP-20 withdrawals
+(1 USD wallet unit pays 1 USDT) and configure a USD/KES conversion rate in Payment
+settings. Withdrawals reserve USD immediately; admins send the payout manually
+and record its hash, or reject and refund. Conversion works in both directions,
+rounds down to the destination cent, and uses the displayed admin-set rate.
+Requests use unique keys to prevent repeated debits after a retry. Conversion
+history and withdrawal history appear in the crypto wallet.
+
+Approval, conversion and withdrawals commit in MongoDB transactions, so MongoDB must support
 transactions (replica set or sharded cluster, including Atlas). A standalone
 MongoDB instance will fail approval without crediting funds.
 

@@ -5033,6 +5033,8 @@ async function startServer() {
     await Promise.all([
       User.createIndexes(),
       privacyModels.CryptoDeposit.createIndexes(),
+      privacyModels.CryptoWithdrawal.createIndexes(),
+      privacyModels.CryptoConversion.createIndexes(),
       privacyModels.AdminClientOwner.createIndexes(),
       privacyModels.AdminPhoneOwner.createIndexes(),
       privacyModels.AdminPinSettings.createIndexes(),

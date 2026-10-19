@@ -1,4 +1,5 @@
 const express = require('express');
+const { createWalletActions, rateMicros, withdrawalView, conversionView } = require('./crypto-wallet-actions');
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
@@ -14,10 +15,10 @@ function tokenAmount(value) {
 }
 function usdCents(value) {
   const amount = String(value ?? '').trim();
-  if (!/^\d{1,7}(?:\.\d{1,2})?$/.test(amount)) throw fail(400, 'Enter the confirmed USD value with at most two decimal places.');
+  if (!/^\d{1,7}(?:\.\d{1,2})?$/.test(amount)) throw fail(400, 'Enter an amount with at most two decimal places.');
   const [whole, fraction = ''] = amount.split('.');
   const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
-  if (cents < 1 || cents > 100000000) throw fail(400, 'Confirmed value must be between USD 0.01 and USD 1,000,000.');
+  if (cents < 1 || cents > 100000000) throw fail(400, 'Amount must be between 0.01 and 1,000,000.');
   return cents;
 }
 const serialize = deposit => ({
@@ -31,7 +32,9 @@ const serialize = deposit => ({
 function createCryptoService({ User, CryptoSetting, CryptoDeposit, mongoose, scope = () => ({}) }) {
   const getSettings = async () => {
     const setting = await CryptoSetting.findById('trust_wallet').lean();
-    return { enabled: Boolean(setting?.enabled), receiving_address: setting?.receiving_address || '', asset: 'USDT', network: 'BEP-20', currency: 'USD' };
+    return { enabled: Boolean(setting?.enabled), receiving_address: setting?.receiving_address || '', asset: 'USDT', network: 'BEP-20', currency: 'USD',
+      withdrawals_enabled: Boolean(setting?.withdrawals_enabled), conversion_enabled: Boolean(setting?.conversion_enabled),
+      usd_kes_rate_micros: setting?.usd_kes_rate_micros || 0, usd_kes_rate: (setting?.usd_kes_rate_micros || 0) / 1000000 };
   };
   async function review(req) {
     if (!ID.test(req.params.id)) throw fail(400, 'Invalid deposit ID.');
@@ -66,8 +69,9 @@ function createCryptoService({ User, CryptoSetting, CryptoDeposit, mongoose, sco
 }
 
 function createCryptoRoutes({ models, mongoose, authenticateToken, scope, emit = () => {} }) {
-  const { User, CryptoSetting, CryptoDeposit } = models;
+  const { User, CryptoSetting, CryptoDeposit, CryptoWithdrawal, CryptoConversion } = models;
   const service = createCryptoService({ ...models, mongoose, scope });
+  const actions = createWalletActions({ models, mongoose, scope, money: usdCents });
   let indexReady;
   function ensureUniqueIndex() {
     if (!indexReady) indexReady = CryptoDeposit.createIndexes().catch(error => { indexReady = null; throw error; });
@@ -80,18 +84,31 @@ function createCryptoRoutes({ models, mongoose, authenticateToken, scope, emit =
     catch (error) {
       if (!error.status && error.code !== 11000) console.error('Crypto deposit error:', error.message);
       res.status(error.code === 11000 ? 409 : error.status || 500).json({ error: error.code === 11000
-        ? 'This transaction hash has already been submitted.' : error.status ? error.message : 'Unable to process crypto deposit. Please retry.' });
+        ? 'This transaction or request has already been submitted. Refresh and retry.' : error.status ? error.message : 'Unable to process wallet request. Please retry.' });
     }
   };
   player.use(authenticateToken);
   player.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   player.get('/wallet', route(async (req, res) => {
-    const [user, settings, deposits] = await Promise.all([
-      User.findOne({ id: req.user.id }).select('usd_balance_cents').lean(), service.getSettings(),
-      CryptoDeposit.find({ user_id: req.user.id }).sort({ created_at: -1 }).limit(50).lean()
+    const [user, settings, deposits, withdrawals, conversions] = await Promise.all([
+      User.findOne({ id: req.user.id }).select('usd_balance_cents balance').lean(), service.getSettings(),
+      CryptoDeposit.find({ user_id: req.user.id }).sort({ created_at: -1 }).limit(50).lean(),
+      CryptoWithdrawal.find({ user_id: req.user.id }).sort({ created_at: -1 }).limit(50).lean(),
+      CryptoConversion.find({ user_id: req.user.id }).sort({ created_at: -1 }).limit(50).lean()
     ]);
     if (!user) throw fail(404, 'Player account not found.');
-    res.json({ usd_balance: (user.usd_balance_cents || 0) / 100, settings, deposits: deposits.map(serialize) });
+    res.json({ usd_balance: (user.usd_balance_cents || 0) / 100, kes_balance: user.balance || 0, settings,
+      deposits: deposits.map(serialize), withdrawals: withdrawals.map(withdrawalView), conversions: conversions.map(conversionView) });
+  }));
+  player.post('/withdrawals', route(async (req, res) => {
+    const result = await actions.withdraw(req);
+    res.json(result);
+    emit({ action: 'crypto_withdrawal_pending', userId: req.user.id, withdrawals: true, dashboard: false });
+  }));
+  player.post('/conversions', route(async (req, res) => {
+    const result = await actions.convert(req);
+    res.json(result);
+    emit({ action: 'currency_converted', userId: req.user.id, balance: result.balance });
   }));
   player.post('/deposits', route(async (req, res) => {
     const amount = tokenAmount(req.body.token_amount);
@@ -123,13 +140,26 @@ function createCryptoRoutes({ models, mongoose, authenticateToken, scope, emit =
       throw fail(400, 'Set a valid BEP-20 receiving address (0x followed by 40 hexadecimal characters).');
     }
     if (/^0x0{40}$/i.test(address)) throw fail(400, 'The zero address cannot receive deposits.');
+    const rate = req.body.usd_kes_rate ? rateMicros(req.body.usd_kes_rate) : 0;
+    if (req.body.conversion_enabled && !rate) throw fail(400, 'Set the USD/KES exchange rate.');
     await CryptoSetting.findByIdAndUpdate('trust_wallet', { $set: { enabled: req.body.enabled,
+      withdrawals_enabled: req.body.withdrawals_enabled === true, conversion_enabled: req.body.conversion_enabled === true,
+      usd_kes_rate_micros: rate,
       receiving_address: address, updated_by: req.user.id, updated_at: new Date() } }, { upsert: true });
     res.json(await service.getSettings());
   }));
   admin.get('/deposits', route(async (req, res) => {
     const deposits = await CryptoDeposit.find(scope(req, 'user_id')).sort({ created_at: -1 }).limit(100).lean();
     res.json({ deposits: deposits.map(serialize) });
+  }));
+  admin.get('/withdrawals', route(async (req, res) => {
+    const withdrawals = await CryptoWithdrawal.find(scope(req, 'user_id')).sort({ created_at: -1 }).limit(100).lean();
+    res.json({ withdrawals: withdrawals.map(withdrawalView) });
+  }));
+  admin.post('/withdrawals/:id/review', route(async (req, res) => {
+    const result = await actions.reviewWithdrawal(req);
+    res.json(result);
+    emit({ action: 'crypto_withdrawal_reviewed', userId: result.userId, withdrawals: true, dashboard: false });
   }));
   admin.post('/deposits/:id/review', route(async (req, res) => {
     const result = await service.review(req);
