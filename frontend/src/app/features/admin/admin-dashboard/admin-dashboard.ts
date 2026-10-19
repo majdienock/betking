@@ -21,6 +21,7 @@ import { AuthService } from '../../../core/services/auth.service';
 import { AviatorGameComponent } from '../../game/aviator/aviator-game.component';
 import { SanitizedModeService } from '../../../core/services/sanitized-mode.service';
 import { AdminInitial, AdminPinService, maskClientPhoneNumbers } from '../../../core/services/admin-pin.service';
+import { CryptoAdminComponent } from '../../../shared/crypto-wallet/crypto-admin.component';
 
 export interface AdminUser {
   id: number;
@@ -102,7 +103,7 @@ export interface PendingWithdrawal {
 @Component({
   selector: 'app-admin-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, AviatorGameComponent],
+  imports: [CommonModule, FormsModule, AviatorGameComponent, CryptoAdminComponent],
   templateUrl: './admin-dashboard.html',
   styleUrl: './admin-dashboard.css'
 })

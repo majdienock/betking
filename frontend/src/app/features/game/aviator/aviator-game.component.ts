@@ -21,6 +21,7 @@ import { ChatMessage, GameRoom, GameSocketService, LiveBetBroadcast, RoomState }
 import { AuthService, User, TransactionRecord } from '../../../core/services/auth.service';
 import { SanitizedModeService } from '../../../core/services/sanitized-mode.service';
 import { getBackendOrigin } from '../../../core/config/backend-url';
+import { CryptoWalletComponent } from '../../../shared/crypto-wallet/crypto-wallet.component';
 
 export type GameState = 'WAITING' | 'RUNNING' | 'CRASHED';
 
@@ -65,7 +66,7 @@ export interface PanelBetState {
 @Component({
   selector: 'app-aviator-game',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CryptoWalletComponent],
   templateUrl: './aviator-game.component.html',
   styleUrl: './aviator-game.component.scss'
 })

@@ -2378,8 +2378,14 @@ app.post('/api/chat/like/:id', async (req, res) => {
 
 // ---------- ADMIN REST APIS ----------
 
+const cryptoRoutes = require('./crypto-deposits').createCryptoRoutes({
+  models: privacyModels, mongoose, authenticateToken, scope: adminClientScope, emit: emitRealtimeMutation
+});
+app.use('/api/crypto', cryptoRoutes.player);
+
 // Admin Overview Stats
 app.use('/api/admin', authenticateAdminToken, adminPrivacy.middleware);
+app.use('/api/admin/crypto', cryptoRoutes.admin);
 app.post('/api/admin/pin/unlock', async (req, res) => {
   try {
     return res.json(await adminPrivacy.unlock(String(req.body.tag || '').toUpperCase(), req.body.pin, req.adminAccountToken));
@@ -5026,6 +5032,7 @@ async function startServer() {
   try {
     await Promise.all([
       User.createIndexes(),
+      privacyModels.CryptoDeposit.createIndexes(),
       privacyModels.AdminClientOwner.createIndexes(),
       privacyModels.AdminPhoneOwner.createIndexes(),
       privacyModels.AdminPinSettings.createIndexes(),

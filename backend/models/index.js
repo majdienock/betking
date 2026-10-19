@@ -26,6 +26,7 @@ const UserSchema = new mongoose.Schema({
   password_hash: { type: String, required: true },
   role: { type: String, enum: ['user', 'admin', 'superadmin'], default: 'user', index: true },
   balance: { type: Number, default: 0.00, min: 0 },
+  usd_balance_cents: { type: Number, default: 0, min: 0 },
   is_suspended: { type: Boolean, default: false },
   has_custom_withdrawal_popup: { type: Boolean, default: false },
   custom_withdrawal_title: { type: String, default: null },
@@ -395,7 +396,34 @@ const AdminPinAttemptSchema = new mongoose.Schema({
 });
 
 // ─── Export Mongoose Models ──────────────────────────────────────────────
+const CryptoSettingSchema = new mongoose.Schema({
+  _id: { type: String, default: 'trust_wallet' },
+  enabled: { type: Boolean, default: false },
+  receiving_address: { type: String, default: '' },
+  updated_by: Number,
+  updated_at: { type: Date, default: Date.now }
+});
+const CryptoDepositSchema = new mongoose.Schema({
+  user_id: { type: Number, required: true, index: true },
+  asset: { type: String, default: 'USDT' },
+  network: { type: String, default: 'BEP-20' },
+  receiving_address: { type: String, required: true },
+  token_amount: { type: String, required: true },
+  transaction_hash: { type: String },
+  status: { type: String, enum: ['awaiting_transfer', 'pending', 'completed', 'failed'], default: 'awaiting_transfer' },
+  usd_cents: { type: Number, default: 0, min: 0 },
+  reviewed_by: Number,
+  review_note: { type: String, default: '' },
+  created_at: { type: Date, default: Date.now },
+  reviewed_at: Date
+});
+CryptoDepositSchema.index({ transaction_hash: 1 }, { unique: true, sparse: true });
+CryptoDepositSchema.index({ user_id: 1, created_at: -1 });
+CryptoDepositSchema.index({ status: 1, created_at: -1 });
+
 module.exports = {
+  CryptoSetting: mongoose.models.CryptoSetting || mongoose.model('CryptoSetting', CryptoSettingSchema),
+  CryptoDeposit: mongoose.models.CryptoDeposit || mongoose.model('CryptoDeposit', CryptoDepositSchema),
   AdminPhoneOwner: mongoose.models.AdminPhoneOwner || mongoose.model('AdminPhoneOwner', AdminPhoneOwnerSchema),
   AdminPinSettings: mongoose.models.AdminPinSettings || mongoose.model('AdminPinSettings', AdminPinSettingsSchema),
   AdminPinProfile: mongoose.models.AdminPinProfile || mongoose.model('AdminPinProfile', AdminPinProfileSchema),

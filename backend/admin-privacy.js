@@ -67,6 +67,8 @@ function protectPayload(payload, directory, tag = null, search = '') {
       return value;
     }
     if (typeof value === 'string') {
+      // EVM addresses and hashes are identifiers, even when a run of digits resembles a phone.
+      if (['receiving_address', 'transaction_hash'].includes(field) && /^0x(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)) return value;
       if (byPhone.get(normalizePhone(value))?.exempt) return value;
       if (restricted && (/phone/i.test(field) || field === 'account_details') && /\d{7}/.test(value.replace(/\D/g, ''))) {
         return value.replace(phonePattern, match => maskPhone(match)) === value ? maskPhone(value) : value.replace(phonePattern, match => maskPhone(match));

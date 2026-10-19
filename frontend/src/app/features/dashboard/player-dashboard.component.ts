@@ -8,6 +8,7 @@ import { AuthService, User } from '../../core/services/auth.service';
 import { SanitizedModeService } from '../../core/services/sanitized-mode.service';
 import { FootballMatch, MatchOutcome, SportsMarketService } from '../../core/services/sports-market.service';
 import { getBackendOrigin } from '../../core/config/backend-url';
+import { CryptoWalletComponent } from '../../shared/crypto-wallet/crypto-wallet.component';
 
 interface BetSlipSelection {
   matchId: string;
@@ -20,7 +21,7 @@ interface BetSlipSelection {
 @Component({
   selector: 'app-player-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, CryptoWalletComponent],
   templateUrl: './player-dashboard.component.html',
   styleUrl: './player-dashboard.component.css'
 })

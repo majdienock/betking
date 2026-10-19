@@ -14,6 +14,7 @@ export function maskClientPhoneNumbers<T>(payload: T): T {
   };
   function visit(value: any, field = ''): any {
     if (typeof value === 'string') {
+      if (['receiving_address', 'transaction_hash'].includes(field) && /^0x(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(value)) return value;
       if (/phone/i.test(field) && !value.includes('*') && value.replace(/\D/g, '').length >= 7) return mask(value);
       return value.replace(phonePattern, mask);
     }
