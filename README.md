@@ -13,7 +13,7 @@ identities are R, D and K, as requested. The existing superadmin is unchanged.
 - Backend build command: npm run build:backend
 - Backend start command: npm start
 - Frontend API setting: BACKEND_ORIGIN selects this site's own backend, exactly as in the original application.
-- PayHero callback: https://api.betpesa.site/api/mpesa/callback
+- PayHero callback: https://www.fevaafrica.com/api/callbacks/betpesa
 
 Keep this site's MongoDB URI, JWT secret and approved payment credentials in
 Render's environment variables. The private backend/.env file contains the
@@ -26,6 +26,22 @@ credentials in source code. The configured integration is the approved original 
 
 No DNS edits, automatic backend-address rewrites, or
 replacement authentication flow are part of this restoration.
+
+### Callback host
+
+The callback host reverse-proxies `POST /api/callbacks/betpesa` to
+`https://api.betpesa.site/api/mpesa/callback`, preserving the JSON body, query
+parameters, authorization header and the API's response status. Keep this rule
+ahead of any frontend catch-all. The callback path must not serve the frontend
+HTML. Use the canonical `www.fevaafrica.com` hostname to avoid the apex-to-www redirect.
+
+The Vercel CDN rule has been published and verified with non-payment callback
+requests. Set Render's `PAYHERO_CALLBACK_URL` to the URL above, preserving any
+existing token query parameter and `PAYHERO_CALLBACK_TOKEN`. The local `.env` and
+example configuration use the verified URL; Render environment settings are
+separate. The frontend domain, API origin, PayHero credentials, payment references,
+callback handler and status polling stay unchanged. No real payment was initiated
+by the callback forwarding checks.
 
 ## Crypto deposits
 
