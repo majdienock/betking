@@ -1,0 +1,5 @@
+{
+  "name": "betpesa",
+  "pages_build_output_dir": "./frontend/dist/frontend/browser",
+  "compatibility_date": "2026-10-22"
+}

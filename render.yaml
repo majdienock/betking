@@ -1,6 +1,6 @@
 # Render blueprint for BETPESA.
 #
-# Render hosts the API only; Vercel builds and hosts the Angular frontend.
+# Render hosts the API only; Cloudflare Pages builds and hosts the Angular frontend.
 #
 # The service must run as a single instance. The crash rounds, their timers and
 # the connected socket clients all live in this process's memory, so a second
@@ -8,7 +8,7 @@
 # players would see different results for the same bet.
 #
 # Attach api.betpesa.site to this service under Settings → Custom Domains. The
-# frontend's committed default already points there, so a Vercel build with no
+# frontend's committed default already points there, so a Pages build with no
 # BACKEND_ORIGIN set still reaches the right API once that domain resolves.
 
 services:

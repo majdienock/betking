@@ -7,8 +7,8 @@
  * Angular compiles to static files, so there is no runtime environment on the
  * CDN that serves them: the API origin has to be decided at build time. This
  * script writes BACKEND_ORIGIN into the generated config the app imports, which
- * is what lets the same commit deploy to Vercel (pointing at the Render API)
- * and to Render (pointing at itself) without a source edit in between.
+ * lets Cloudflare Pages serve the frontend while requests go to the Render API,
+ * without a source edit for each deployment.
  *
  * With BACKEND_ORIGIN unset the committed default is left exactly as it is, so
  * a local `npm run build` stays reproducible.

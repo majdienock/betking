@@ -59,6 +59,34 @@ for (const relativePath of ['vercel.json', 'frontend/vercel.json']) {
   }
 }
 
+// Cloudflare Pages reads its own output configuration and static headers.
+const pagesFile = readIfPresent('wrangler.json');
+if (pagesFile) {
+  try {
+    const pages = JSON.parse(pagesFile.buffer.toString('utf8'));
+    if (pages.pages_build_output_dir !== './frontend/dist/frontend/browser') {
+      problems.push('wrangler.json must point to the Angular browser output: ./frontend/dist/frontend/browser.');
+    }
+  } catch (err) {
+    problems.push(`wrangler.json is invalid JSON: ${err.message}`);
+  }
+
+  const headers = readIfPresent('frontend/public/_headers');
+  const headerRules = new Map((headers ? headers.buffer.toString('utf8') : '')
+    .trim().split(/\r?\n\s*\r?\n/).map(block => {
+      const [route, ...values] = block.split(/\r?\n/);
+      return [route.trim(), values.join('\n')];
+    }));
+  for (const route of ['/', '/index.html', '/sw.js']) {
+    if (!/Cache-Control:[^\n]*\bno-store\b/i.test(headerRules.get(route) || '')) {
+      problems.push(`Cloudflare Pages _headers must prevent caching ${route}.`);
+    }
+  }
+  if (readIfPresent('frontend/public/404.html')) {
+    problems.push('A top-level 404.html disables Cloudflare Pages automatic Angular SPA routing.');
+  }
+}
+
 // ---- 2. No credentials baked into source -----------------------------------
 const sourceFiles = [];
 const brandedFiles = [];

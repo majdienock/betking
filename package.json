@@ -10,6 +10,7 @@
     "check": "node scripts/check-config.js",
     "build": "node scripts/check-config.js && npm --prefix frontend install && npm --prefix frontend run build && npm --prefix backend install --omit=dev",
     "build:backend": "node scripts/check-config.js && npm --prefix backend ci --omit=dev",
+    "build:pages": "node scripts/check-config.js && npm --prefix frontend ci --include=dev --no-audit --no-fund && npm --prefix frontend run build",
     "start": "node backend/server.js",
     "dev:backend": "npm --prefix backend run dev",
     "dev:frontend": "npm --prefix frontend start",
