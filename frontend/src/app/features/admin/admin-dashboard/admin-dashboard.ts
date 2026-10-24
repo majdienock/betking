@@ -1,5 +1,6 @@
 import { Component, OnDestroy, OnInit, ChangeDetectorRef, inject, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { PaymentGatewaySettingsComponent } from '../payment-gateway-settings.component';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
@@ -103,7 +104,7 @@ export interface PendingWithdrawal {
 @Component({
   selector: 'app-admin-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, AviatorGameComponent, CryptoAdminComponent],
+  imports: [CommonModule, FormsModule, AviatorGameComponent, PaymentGatewaySettingsComponent, CryptoAdminComponent],
   templateUrl: './admin-dashboard.html',
   styleUrl: './admin-dashboard.css'
 })
