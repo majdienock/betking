@@ -96,14 +96,15 @@ HTTP 410 when creating a crypto deposit or submitting a new transfer, even if th
 stored legacy setting was enabled. Admins cannot enable deposits again.
 
 Existing deposit records and USD/KES balances are preserved. Previous crypto
-deposits remain visible under Withdrawal → USD wallet → History and in admin
-Payment settings. Already submitted requests can still be reviewed with the
-existing ownership restrictions and protections against duplicate crediting.
+deposits remain visible under Withdrawal → USD wallet → History. Crypto settings
+and crypto management panels have been removed from the admin dashboard. Existing
+review APIs retain their ownership restrictions and duplicate-credit protection.
 Unsubmitted historical requests cannot be resumed; contact support about any
 earlier transfer. No balances or database records are deleted or migrated.
 
-Admins can still enable USDT BEP-20 withdrawals and USD/KES conversion in Payment
-settings. Withdrawals reserve USD until paid or rejected and refunded. Conversion
+Existing USDT BEP-20 withdrawal and USD/KES conversion settings stay in the
+database; their admin controls are no longer displayed. Withdrawals reserve USD
+until paid or rejected and refunded. Conversion
 uses the displayed admin-set rate and rounds down to the destination cent. Both
 flows retain their histories and unique request keys to prevent duplicate debits.
 These operations and reviews require MongoDB transactions (Atlas or a replica set).
