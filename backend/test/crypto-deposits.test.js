@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createCryptoRoutes, createCryptoService, usdCents, tokenAmount } = require('../crypto-deposits');
+const { createCryptoRoutes, createCryptoService, usdCents } = require('../crypto-deposits');
 const { protectPayload } = require('../admin-privacy');
 
 const address = '0x' + '0712345678'.repeat(4);
@@ -16,8 +16,6 @@ test('USD uses exact integer cents and rejects invalid, fractional-cent and over
   for (const value of ['', null, false, -1, 0, '1e3', '1.001', 'Infinity', '1000000.01', '12abc']) {
     assert.throws(() => usdCents(value), { status: 400 });
   }
-  assert.equal(tokenAmount('0.000000000000000001'), '0.000000000000000001');
-  for (const value of [0, -1, '1e3', '1000001', '0.0000000000000000001']) assert.throws(() => tokenAmount(value), { status: 400 });
 });
 
 function fixture() {
@@ -103,55 +101,81 @@ test('privacy masking preserves valid crypto identifiers while still masking pla
   assert.equal(result.deposits[0].phone_number, '071*****78');
 });
 
-test('player API snapshots addresses, authenticates requests, validates hashes and prevents cross-player reuse', async () => {
-  const deposits = new Map();
-  let setting = { enabled: true, receiving_address: address };
-  let indexesChecked = 0;
-  const CryptoDeposit = {
-    async create(data) {
-      const record = { ...data, _id: String(deposits.size + 1).padStart(24, 'a'), status: 'awaiting_transfer', usd_cents: 0 };
-      deposits.set(record._id, record); return record;
+function retiredRoutes() {
+  const state = { setting: { enabled: true, receiving_address: address, withdrawals_enabled: true,
+    conversion_enabled: true, usd_kes_rate_micros: 130000000 }, user: { balance: 555, usd_balance_cents: 1011 },
+    deposits: [{ _id: depositId, user_id: 7, status: 'pending', token_amount: '10', receiving_address: address,
+      transaction_hash: hash, usd_cents: 0 }], writes: 0 };
+  const history = rows => ({ sort() { return this; }, limit() { return this; }, lean: async () => structuredClone(rows) });
+  const noWrite = async () => { state.writes++; throw new Error('Retired deposit must not write'); };
+  const models = {
+    User: { findOne: () => ({ select: () => ({ lean: async () => state.user }) }), findOneAndUpdate: noWrite },
+    CryptoSetting: {
+      findById: () => ({ lean: async () => state.setting }),
+      findByIdAndUpdate: async (id, update) => { assert.equal(id, 'trust_wallet'); Object.assign(state.setting, update.$set); }
     },
-    async createIndexes() { indexesChecked++; },
-    async findOneAndUpdate(filter, update) {
-      const record = deposits.get(filter._id);
-      if (!record || record.user_id !== filter.user_id || record.status !== filter.status) return null;
-      if ([...deposits.values()].some(row => row.transaction_hash === update.$set.transaction_hash)) throw Object.assign(new Error('Duplicate'), { code: 11000 });
-      Object.assign(record, update.$set); return record;
-    }
+    CryptoDeposit: { create: noWrite, findOneAndUpdate: noWrite, createIndexes: noWrite,
+      find: filter => { assert.deepEqual(filter, { user_id: 7 }); return history(state.deposits); } },
+    CryptoWithdrawal: { find: () => history([]) }, CryptoConversion: { find: () => history([]) }
   };
-  const { player } = createCryptoRoutes({
-    models: { CryptoDeposit, CryptoSetting: { findById: () => ({ lean: async () => setting }) },
-      User: { findOne: () => ({ select: () => ({ lean: async () => ({ id: 7 }) }) }) } },
-    authenticateToken(req, res, next) {
-      if (!req.headers.authorization) return res.status(401).json({ error: 'Authentication required' });
-      req.user = { id: Number(req.headers.authorization) }; next();
-    }, scope: scoped
-  });
-  // Dispatch through the real router without opening sockets in restricted environments.
-  const call = (path, method, body, user = '7') => new Promise((resolve, reject) => {
+  const routes = createCryptoRoutes({ models, authenticateToken(req, res, next) {
+    if (!req.headers.authorization) return res.status(401).json({ error: 'Authentication required' });
+    req.user = { id: 7 }; next();
+  }, scope: scoped });
+  const call = (router, path, method, body = {}, authenticated = true) => new Promise((resolve, reject) => {
     let status = 200;
-    player.handle({ url: path, method, body, headers: user ? { authorization: user } : {} }, {
+    router.handle({ url: path, method, body, user: { id: 7 }, headers: authenticated ? { authorization: 'test-token' } : {} }, {
       set() {}, status(code) { status = code; return this; },
-      json(result) { resolve({ status, json: async () => result }); return this; }
-    }, error => reject(error || new Error('Route not found')));
+      json(result) { resolve({ status, body: result }); return this; }
+    }, cause => reject(cause || new Error('Route not found')));
   });
-  assert.equal((await call('/deposits', 'POST', { token_amount: '10' }, '')).status, 401);
-  let response = await call('/deposits', 'POST', { token_amount: '10' });
-  assert.equal(response.status, 201);
-  const first = (await response.json()).deposit;
-  setting = { enabled: false, receiving_address: '0x' + 'b'.repeat(40) };
-  assert.equal((await call('/deposits', 'POST', { token_amount: '10' })).status, 400);
-  assert.equal(first.receiving_address, address);
-  assert.equal((await call(`/deposits/${first.id}/transfer`, 'PUT', { transaction_hash: hash }, '8')).status, 409);
-  assert.equal((await call(`/deposits/${first.id}/transfer`, 'PUT', { transaction_hash: 'bad' })).status, 400);
-  assert.equal((await call(`/deposits/${first.id}/transfer`, 'PUT', { transaction_hash: hash })).status, 200);
-  assert.equal(deposits.get(first.id).status, 'pending');
-  assert.equal(deposits.get(first.id).usd_cents, 0);
-  setting.enabled = true;
-  response = await call('/deposits', 'POST', { token_amount: '10' }, '8');
-  const second = (await response.json()).deposit;
-  assert.equal((await call(`/deposits/${second.id}/transfer`, 'PUT', { transaction_hash: hash.toUpperCase().replace('0X', '0x') }, '8')).status, 409);
-  assert.equal(deposits.get(second.id).status, 'awaiting_transfer');
-  assert.equal(indexesChecked, 1);
+  return { state, routes, call };
+}
+
+test('retired player deposit routes reject old clients without creating records, transferring hashes or touching balances', async () => {
+  const f = retiredRoutes();
+  const before = structuredClone(f.state);
+  assert.equal((await f.call(f.routes.player, '/deposits', 'POST', {}, false)).status, 401);
+  for (const [path, method, body] of [
+    ['/deposits', 'POST', { token_amount: '10' }],
+    [`/deposits/${depositId}/transfer`, 'PUT', { transaction_hash: hash }]
+  ]) {
+    const response = await f.call(f.routes.player, path, method, body);
+    assert.equal(response.status, 410);
+    assert.match(response.body.error, /M-Pesa/);
+  }
+  assert.deepEqual(f.state, before);
+});
+
+test('legacy enabled settings cannot reopen deposits or expose a new receiving address, and wallet settings still save', async () => {
+  const f = retiredRoutes();
+  const loaded = await f.call(f.routes.admin, '/settings', 'GET');
+  assert.equal(loaded.body.enabled, false);
+  assert.equal(loaded.body.receiving_address, '');
+  assert.equal(loaded.body.withdrawals_enabled, true);
+  assert.equal((await f.call(f.routes.admin, '/settings', 'PUT', { enabled: true, receiving_address: address })).status, 410);
+  assert.equal(f.state.setting.enabled, true); // The rejected request changed no data.
+  const saved = await f.call(f.routes.admin, '/settings', 'PUT', {
+    withdrawals_enabled: true, conversion_enabled: true, usd_kes_rate: '131.25', receiving_address: 'replace-address'
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.enabled, false);
+  assert.equal(saved.body.usd_kes_rate_micros, 131250000);
+  assert.equal(f.state.setting.receiving_address, address);
+  assert.equal(f.state.setting.withdrawals_enabled, true);
+  assert.equal(f.state.setting.conversion_enabled, true);
+  assert.equal(f.state.writes, 0);
+});
+
+test('wallet reads retain previous deposits and both currency balances after deposits are removed', async () => {
+  const f = retiredRoutes();
+  const before = structuredClone(f.state);
+  const response = await f.call(f.routes.player, '/wallet', 'GET');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.usd_balance, 10.11);
+  assert.equal(response.body.kes_balance, 555);
+  assert.equal(response.body.settings.enabled, false);
+  assert.equal(response.body.deposits[0].transaction_hash, hash);
+  assert.equal(response.body.deposits[0].status, 'pending');
+  assert.deepEqual(f.state, before);
 });

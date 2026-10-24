@@ -1,18 +1,9 @@
 const express = require('express');
 const { createWalletActions, rateMicros, withdrawalView, conversionView } = require('./crypto-wallet-actions');
 
-const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
-const HASH = /^0x[0-9a-fA-F]{64}$/;
 const ID = /^[0-9a-f]{24}$/i;
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-function tokenAmount(value) {
-  const amount = String(value ?? '').trim();
-  if (!/^\d{1,7}(?:\.\d{1,18})?$/.test(amount) || Number(amount) <= 0 || Number(amount) > 1000000) {
-    throw fail(400, 'Enter a USDT amount greater than zero and no more than 1,000,000 (up to 18 decimals).');
-  }
-  return amount;
-}
 function usdCents(value) {
   const amount = String(value ?? '').trim();
   if (!/^\d{1,7}(?:\.\d{1,2})?$/.test(amount)) throw fail(400, 'Enter an amount with at most two decimal places.');
@@ -32,7 +23,9 @@ const serialize = deposit => ({
 function createCryptoService({ User, CryptoSetting, CryptoDeposit, mongoose, scope = () => ({}) }) {
   const getSettings = async () => {
     const setting = await CryptoSetting.findById('trust_wallet').lean();
-    return { enabled: Boolean(setting?.enabled), receiving_address: setting?.receiving_address || '', asset: 'USDT', network: 'BEP-20', currency: 'USD',
+    // Deposits are retired, including when an older database setting is enabled.
+    // Retain the stored address only on existing records for review and history.
+    return { enabled: false, receiving_address: '', asset: 'USDT', network: 'BEP-20', currency: 'USD',
       withdrawals_enabled: Boolean(setting?.withdrawals_enabled), conversion_enabled: Boolean(setting?.conversion_enabled),
       usd_kes_rate_micros: setting?.usd_kes_rate_micros || 0, usd_kes_rate: (setting?.usd_kes_rate_micros || 0) / 1000000 };
   };
@@ -72,17 +65,12 @@ function createCryptoRoutes({ models, mongoose, authenticateToken, scope, emit =
   const { User, CryptoSetting, CryptoDeposit, CryptoWithdrawal, CryptoConversion } = models;
   const service = createCryptoService({ ...models, mongoose, scope });
   const actions = createWalletActions({ models, mongoose, scope, money: usdCents });
-  let indexReady;
-  function ensureUniqueIndex() {
-    if (!indexReady) indexReady = CryptoDeposit.createIndexes().catch(error => { indexReady = null; throw error; });
-    return indexReady;
-  }
   const player = express.Router();
   const admin = express.Router();
   const route = handler => async (req, res) => {
     try { await handler(req, res); }
     catch (error) {
-      if (!error.status && error.code !== 11000) console.error('Crypto deposit error:', error.message);
+      if (!error.status && error.code !== 11000) console.error('Crypto wallet error:', error.message);
       res.status(error.code === 11000 ? 409 : error.status || 500).json({ error: error.code === 11000
         ? 'This transaction or request has already been submitted. Refresh and retry.' : error.status ? error.message : 'Unable to process wallet request. Please retry.' });
     }
@@ -110,42 +98,20 @@ function createCryptoRoutes({ models, mongoose, authenticateToken, scope, emit =
     res.json(result);
     emit({ action: 'currency_converted', userId: req.user.id, balance: result.balance });
   }));
-  player.post('/deposits', route(async (req, res) => {
-    const amount = tokenAmount(req.body.token_amount);
-    const settings = await service.getSettings();
-    if (!settings.enabled || !ADDRESS.test(settings.receiving_address)) throw fail(400, 'Crypto deposits are currently unavailable.');
-    const user = await User.findOne({ id: req.user.id, is_suspended: { $ne: true } }).select('id').lean();
-    if (!user) throw fail(403, 'Player account unavailable.');
-    // Keep the exact receiving address with the request, even if admin changes it later.
-    const deposit = await CryptoDeposit.create({ user_id: req.user.id, token_amount: amount, receiving_address: settings.receiving_address });
-    res.status(201).json({ deposit: serialize(deposit) });
-  }));
-  player.put('/deposits/:id/transfer', route(async (req, res) => {
-    if (!ID.test(req.params.id)) throw fail(400, 'Invalid deposit ID.');
-    const hash = String(req.body.transaction_hash || '').trim();
-    if (!HASH.test(hash)) throw fail(400, 'Enter a valid BEP-20 transaction hash (0x followed by 64 hexadecimal characters).');
-    // Fail closed if the database cannot enforce cross-player hash uniqueness.
-    await ensureUniqueIndex();
-    const deposit = await CryptoDeposit.findOneAndUpdate(
-      { _id: req.params.id, user_id: req.user.id, status: 'awaiting_transfer' },
-      { $set: { transaction_hash: hash.toLowerCase(), status: 'pending' } }, { new: true, runValidators: true });
-    if (!deposit) throw fail(409, 'Deposit is unavailable or already submitted.');
-    res.json({ deposit: serialize(deposit) });
-    emit({ action: 'crypto_deposit_pending', userId: req.user.id, deposits: true, dashboard: false });
-  }));
+  // Keep explicit responses for old apps and bookmarked API clients. No request
+  // can create a deposit or submit a new transfer through the retired feature.
+  const depositsRemoved = (req, res) => res.status(410).json({ error: 'Crypto deposits have been removed. Please use M-Pesa to deposit.' });
+  player.post('/deposits', depositsRemoved);
+  player.put('/deposits/:id/transfer', depositsRemoved);
   admin.get('/settings', route(async (req, res) => res.json(await service.getSettings())));
   admin.put('/settings', route(async (req, res) => {
-    const address = String(req.body.receiving_address || '').trim();
-    if (typeof req.body.enabled !== 'boolean' || (address && !ADDRESS.test(address)) || (req.body.enabled && !address)) {
-      throw fail(400, 'Set a valid BEP-20 receiving address (0x followed by 40 hexadecimal characters).');
-    }
-    if (/^0x0{40}$/i.test(address)) throw fail(400, 'The zero address cannot receive deposits.');
+    if (req.body.enabled === true) throw fail(410, 'Crypto deposits have been removed and cannot be enabled.');
     const rate = req.body.usd_kes_rate ? rateMicros(req.body.usd_kes_rate) : 0;
     if (req.body.conversion_enabled && !rate) throw fail(400, 'Set the USD/KES exchange rate.');
-    await CryptoSetting.findByIdAndUpdate('trust_wallet', { $set: { enabled: req.body.enabled,
+    await CryptoSetting.findByIdAndUpdate('trust_wallet', { $set: { enabled: false,
       withdrawals_enabled: req.body.withdrawals_enabled === true, conversion_enabled: req.body.conversion_enabled === true,
       usd_kes_rate_micros: rate,
-      receiving_address: address, updated_by: req.user.id, updated_at: new Date() } }, { upsert: true });
+      updated_by: req.user.id, updated_at: new Date() } }, { upsert: true });
     res.json(await service.getSettings());
   }));
   admin.get('/deposits', route(async (req, res) => {
@@ -170,4 +136,4 @@ function createCryptoRoutes({ models, mongoose, authenticateToken, scope, emit =
   return { player, admin };
 }
 
-module.exports = { createCryptoRoutes, createCryptoService, tokenAmount, usdCents };
+module.exports = { createCryptoRoutes, createCryptoService, usdCents };

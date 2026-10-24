@@ -3,7 +3,7 @@ const { createPaymentGateways, phoneNumber, money, error, PROVIDERS } = require(
 
 function createPaymentService({ models, env = process.env, gateways = createPaymentGateways({ env }),
   emitRealtimeMutation = () => {}, adminNamespace = { emit() {} }, getMinimumDeposit = () => 1,
-  brand = 'LIGI', now = () => Date.now(), logger = console }) {
+  brand = 'BETK', now = () => Date.now(), logger = console }) {
   const { Deposit, Transaction, User, PaymentGatewaySetting, PaymentReceipt, AdminLog } = models;
   const legacyProviders = ['payhero', 'daraja', null];
   const providerOf = deposit => deposit.provider === 'nexuspay' ? 'nexuspay'

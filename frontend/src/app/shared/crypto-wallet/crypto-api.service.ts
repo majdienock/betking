@@ -47,8 +47,6 @@ export class CryptoApiService {
   private get base() { return `${getBackendOrigin()}/api`; }
   private get options() { return { headers: { Authorization: `Bearer ${this.auth.getToken()}` } }; }
   wallet() { return this.http.get<CryptoWallet>(`${this.base}/crypto/wallet`, this.options); }
-  create(amount: string) { return this.http.post<{ deposit: CryptoDeposit }>(`${this.base}/crypto/deposits`, { token_amount: amount }, this.options); }
-  submit(id: string, hash: string) { return this.http.put<{ deposit: CryptoDeposit }>(`${this.base}/crypto/deposits/${id}/transfer`, { transaction_hash: hash }, this.options); }
   settings() { return this.http.get<CryptoSettings>(`${this.base}/admin/crypto/settings`, this.options); }
   save(settings: CryptoSettings) { return this.http.put<CryptoSettings>(`${this.base}/admin/crypto/settings`, settings, this.options); }
   deposits() { return this.http.get<{ deposits: CryptoDeposit[] }>(`${this.base}/admin/crypto/deposits`, this.options); }

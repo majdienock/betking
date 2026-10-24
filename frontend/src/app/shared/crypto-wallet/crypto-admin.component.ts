@@ -10,17 +10,15 @@ import { AdminPinService } from '../../core/services/admin-pin.service';
   selector: 'app-crypto-admin', standalone: true, imports: [CommonModule, FormsModule],
   template: `
     <section class="crypto-card">
-      <span class="eyebrow">TRUST WALLET · USDT · BEP-20</span><h3>Crypto wallet settings</h3>
+      <span class="eyebrow">USD · USDT · BEP-20</span><h3>Wallet withdrawals and conversion</h3>
       <ng-container *ngIf="settingsLoaded()">
-        <label>Trust Wallet receiving address<input type="text" [(ngModel)]="settings.receiving_address" placeholder="0x…" autocomplete="off" [disabled]="saving()"></label>
-        <label><input type="checkbox" [(ngModel)]="settings.enabled" [disabled]="saving()"> Enable USDT deposits on BEP-20</label>
         <label><input type="checkbox" [(ngModel)]="settings.withdrawals_enabled" [disabled]="saving()"> Enable USDT withdrawals</label>
         <label><input type="checkbox" [(ngModel)]="settings.conversion_enabled" [disabled]="saving()"> Enable USD/KES conversion</label>
         <label>1 USD = KES<input type="number" min="0.000001" max="1000000" step="0.000001" [(ngModel)]="settings.usd_kes_rate" [disabled]="saving()"></label>
-        <button type="button" (click)="save()" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save crypto settings' }}</button>
+        <button type="button" (click)="save()" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save wallet settings' }}</button>
       </ng-container>
-      <div class="history-heading"><h4>Crypto deposit requests</h4><button class="secondary" type="button" (click)="loadDeposits()">Refresh requests</button></div>
-      <p *ngIf="!deposits().length">No crypto requests found.</p>
+      <div class="history-heading"><h4>Previous crypto deposits</h4><button class="secondary" type="button" (click)="loadDeposits()">Refresh history</button></div>
+      <p *ngIf="!deposits().length">No previous crypto deposits.</p>
       <article *ngFor="let deposit of deposits()" class="deposit-row">
         <div><strong>Player #{{ deposit.user_id }} · {{ deposit.token_amount }} USDT</strong><span class="status">{{ deposit.status }}</span></div>
         <small>{{ deposit.created_at | date:'medium' }}</small>
@@ -71,6 +69,8 @@ export class CryptoAdminComponent {
   notes: Record<string, string> = {};
   constructor() {
     this.loadSettings();
+    this.loadDeposits();
+    this.loadWithdrawals();
     timer(10000, 10000).pipe(takeUntilDestroyed()).subscribe(() => { this.loadDeposits(); this.loadWithdrawals(); });
     this.pin.changed$.pipe(takeUntilDestroyed()).subscribe(() => {
       this.deposits.set([]); this.withdrawals.set([]); this.amounts = {}; this.notes = {}; this.payoutHashes = {};
@@ -107,8 +107,8 @@ export class CryptoAdminComponent {
   save() {
     if (this.saving()) return;
     this.saving.set(true); this.message.set('');
-    this.api.save(this.settings).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: settings => { this.settings = settings; this.saving.set(false); this.message.set('Trust Wallet settings saved.'); },
+    this.api.save({ ...this.settings, enabled: false, receiving_address: '' }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: settings => { this.settings = settings; this.saving.set(false); this.message.set('Wallet settings saved.'); },
       error: error => { this.saving.set(false); this.message.set(error?.error?.error || 'Unable to save settings.'); }
     });
   }
