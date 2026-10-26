@@ -6,6 +6,7 @@ import { Router } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
 import { SanitizedModeService } from '../../../core/services/sanitized-mode.service';
 import { getBackendOrigin } from '../../../core/config/backend-url';
+import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-auth-landing',
@@ -768,8 +769,13 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
   public supportStatusMsg: string | null = null;
   public supportMessages: Array<{ sender: 'user' | 'admin'; text: string; created_at: string }> = [];
   private supportPollTimer: ReturnType<typeof setInterval> | null = null;
+  private backendWarmup?: Subscription;
 
   ngOnInit() {
+    // Start connecting while the person fills in the form. A failed background
+    // check is retried and surfaced by the actual login or registration request.
+    this.backendWarmup = this.authService.prepareBackend().subscribe({ error: () => {} });
+
     // Check if player arrived via account suspension
     if (new URLSearchParams(window.location.search).get('notice') === 'suspended') {
       this.isSuspendedNotice = true;
@@ -800,6 +806,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.backendWarmup?.unsubscribe();
     if (this.supportPollTimer) {
       clearInterval(this.supportPollTimer);
       this.supportPollTimer = null;

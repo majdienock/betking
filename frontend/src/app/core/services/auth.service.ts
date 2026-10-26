@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { BehaviorSubject, Observable, tap, catchError, of, throwError, timeout } from 'rxjs';
+import { BehaviorSubject, Observable, tap, catchError, of, throwError, timeout, defer, finalize, map, retry, shareReplay, switchMap, timer } from 'rxjs';
 import { getBackendOrigin } from '../config/backend-url';
 import { WithdrawalNoticeService } from './withdrawal-notice.service';
 
@@ -106,6 +106,7 @@ export class AuthService {
   // Survives a blocked storage for the life of the page, so a player can still
   // finish signing up even when the browser refuses to persist anything.
   private memoryToken: string | null = null;
+  private backendReadiness: Observable<void> | null = null;
 
 
   public currentUser$ = new BehaviorSubject<User | null>(null);
@@ -260,16 +261,53 @@ export class AuthService {
     };
   }
 
+  /** Wake an idle API with read-only requests before submitting credentials. */
+  public prepareBackend(): Observable<void> {
+    if (!this.backendReadiness) {
+      this.backendReadiness = defer(() => this.http.get<{ status?: string }>(`${getBackendOrigin()}/healthz`)).pipe(
+        timeout({ first: 10000 }),
+        map(health => {
+          if (health?.status !== 'ok') {
+            throw { status: 503, message: 'The server is not ready yet.' };
+          }
+        }),
+        retry({
+          delay: error => {
+            // A sleeping host can answer with a loading page, a gateway error,
+            // or no response. Configuration failures need operator attention.
+            const transient = error?.name === 'TimeoutError'
+              || [0, 200, 500, 502, 503, 504, 520, 521, 522, 523, 524].includes(error?.status);
+            if (!transient || error?.error?.configuration === 'invalid') {
+              return throwError(() => error);
+            }
+            return timer(2000);
+          }
+        }),
+        timeout({ first: 90000 }),
+        catchError(error => throwError(() => error?.name === 'TimeoutError'
+          ? { status: 503, message: 'The server is still starting or unavailable. Please try again shortly.' }
+          : error)),
+        finalize(() => { this.backendReadiness = null; }),
+        shareReplay({ bufferSize: 1, refCount: true })
+      );
+    }
+    return this.backendReadiness;
+  }
+
   public register(credentials: { username: string; phone_number?: string; password: string }): Observable<AuthResponse> {
-    return this.http.post<AuthResponse>(`${this.apiUrl}/register`, credentials).pipe(
-      timeout({ first: 30000 }),
+    return this.prepareBackend().pipe(
+      switchMap(() => this.http.post<AuthResponse>(`${this.apiUrl}/register`, credentials).pipe(
+        timeout({ first: 30000 })
+      )),
       catchError(err => throwError(() => this.toAuthError(err)))
     );
   }
 
   public login(credentials: { username: string; password: string }): Observable<AuthResponse> {
-    return this.http.post<AuthResponse>(`${this.apiUrl}/login`, credentials).pipe(
-      timeout({ first: 30000 }),
+    return this.prepareBackend().pipe(
+      switchMap(() => this.http.post<AuthResponse>(`${this.apiUrl}/login`, credentials).pipe(
+        timeout({ first: 30000 })
+      )),
       tap(res => this.setSession(res)),
       catchError(err => throwError(() => this.toAuthError(err)))
     );

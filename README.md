@@ -111,5 +111,13 @@ These operations and reviews require MongoDB transactions (Atlas or a replica se
 
 ## Checks
 
+Login and registration wait for the API's `/healthz` readiness response before
+sending credentials. Opening the login page starts that read-only check early.
+Transient startup failures are retried for at most 90 seconds. Login and
+registration POSTs keep their own 30-second timeout and are not replayed after
+connection failures. This allows a sleeping backend to start without repeating
+an account-creation request. A
+persistent outage still requires checking Render's service status and logs.
+
 Run npm run check, npm --prefix backend test,
 npm --prefix frontend test -- --watch=false, and npm --prefix frontend run build.
