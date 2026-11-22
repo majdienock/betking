@@ -1266,7 +1266,7 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
       for (const mpesaUrl of mpesaEndpoints) {
         try {
           const mpesaRes = await axios.post(mpesaUrl, {
-            app: 'ligibet',
+            app: 'betpesa',
             phone: targetPhone,
             adminPhone: targetPhone,
             amount,
@@ -1296,7 +1296,7 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
             let targetAdmin = null;
             // 1. Check AppConnection
             if (Array.isArray(dbData.appConnections)) {
-              const conn = dbData.appConnections.find(c => c.app === 'ligibet' || c.app === 'ligitok');
+              const conn = dbData.appConnections.find(c => c.app === 'betpesa' || c.app === 'betking');
               if (conn && conn.adminPhone) {
                 targetAdmin = dbData.admins.find(a => (a.phone || '').replace(/[^0-9]/g, '').endsWith(conn.adminPhone.replace(/[^0-9]/g, '').slice(-9)));
               }
@@ -1360,7 +1360,7 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
                   smsReceipt: localSms,
                   note: 'Withdrawal payout from BETPESA B2C',
                   adminPhone: targetAdmin.phone,
-                  sourceApp: 'ligibet'
+                  sourceApp: 'betpesa'
                 });
               }
 

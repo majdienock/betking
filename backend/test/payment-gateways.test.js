@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { createPaymentGateways, phoneNumber } = require('../payment-gateways');
-const deposit = { id: 7, amount: 100, payer_phone: '254712345678', external_reference: 'INTERNAL-7', account_reference: 'LIGI-7', mpesa_checkout_request_id: 'ws_CO_test' };
+const deposit = { id: 7, amount: 100, payer_phone: '254712345678', external_reference: 'INTERNAL-7', account_reference: 'BETK-7', mpesa_checkout_request_id: 'ws_CO_test' };
 const env = { NEXUSPAY_API_KEY: 'test-secret', PAYHERO_AUTH_TOKEN: 'test-token', PAYHERO_CHANNEL_ID: '1', PAYHERO_CALLBACK_URL: 'https://example.test/callback' };
 
 test('Nexus Pay submits the documented request and optional settlement routing without a customer callback URL', async () => {
@@ -11,7 +11,7 @@ test('Nexus Pay submits the documented request and optional settlement routing w
   } });
   assert.deepEqual(await gateways.initiate('nexuspay', deposit, 'Customer'), { checkoutRequestId: 'ws_CO_test', providerReference: '42' });
   assert.equal(requests[0][0], 'https://makamescopay.com/api/payments/stkpush');
-  assert.deepEqual(requests[0][1], { phoneNumber: '254712345678', amount: 100, accountReference: 'LIGI-7', transactionDesc: 'M-Pesa deposit', settlementAccountId: 4, tenantCode: 'tnnt_test' });
+  assert.deepEqual(requests[0][1], { phoneNumber: '254712345678', amount: 100, accountReference: 'BETK-7', transactionDesc: 'M-Pesa deposit', settlementAccountId: 4, tenantCode: 'tnnt_test' });
   assert.equal(requests[0][2].headers['X-API-Key'], 'test-secret');
   assert.equal(requests[0][2].headers.Authorization, undefined);
 });
