@@ -34,7 +34,7 @@ describe('Admin dashboard live account management', () => {
       ...Object.fromEntries([
         'transactionUpdate$', 'dashboardStatsUpdated$', 'walletUpdated$',
         'transactionsUpdated$', 'depositsUpdated$', 'withdrawalsUpdated$',
-        'userUpdated$', 'activityUpdated$', 'predatorTextUpdate$', 'accessRevoked$', 'depositInitiated$', 'onlinePlayers$', 'supportTicketUpdated$', 'clientClaimed$', 'pinChanged$'
+        'userUpdated$', 'activityUpdated$', 'predatorTextUpdate$', 'accessRevoked$', 'depositInitiated$', 'onlinePlayers$', 'supportTicketUpdated$', 'supportTicketsDeleted$', 'clientClaimed$', 'leaderboardUpdated$', 'claimTagsUpdated$', 'pinChanged$', 'timedCrashTimeoutUpdated$'
       ].map(key => [key, new BehaviorSubject(null)]))
     };
     auth = {
@@ -70,7 +70,8 @@ describe('Admin dashboard live account management', () => {
       onlineUsers: 0, connectedPlayers: 0, topPlayers: [], version: 0, updatedAt: '2026-10-05T12:00:00Z'
     });
     http.expectOne(request => request.url.endsWith('/api/admin/support/tickets')).flush({ tickets: [] });
-  });
+    http.expectOne(request => request.url.endsWith('/api/admin/withdrawal-settings')).flush({ minimum_total_wager: 2500 });
+  }, 30000);
 
   afterEach(() => {
     fixture.destroy();
@@ -113,6 +114,140 @@ describe('Admin dashboard live account management', () => {
     expect(component.stats.totalDeposits).toBe(2500);
   });
 
+  it('deletes only marked Support conversations after confirmation and closes a removed conversation', () => {
+    const first = { id: 21, category: 'general', status: 'open', messages: [] };
+    const keep = { id: 22, category: 'general', status: 'open', messages: [] };
+    component.supportTickets = [first, keep];
+    component.selectTicket(first);
+    component.markSupportTicket(21);
+    const confirm = vi.spyOn(component as any, 'openConfirmDialog');
+    component.deleteMarkedSupportConversations();
+    http.expectNone(req => req.method === 'DELETE');
+    (confirm.mock.calls[0][0] as { onConfirm: () => void }).onConfirm();
+    const request = http.expectOne(req => req.method === 'DELETE' && req.url.endsWith('/support/tickets'));
+    expect(request.request.body).toEqual({ ticket_ids: [21] });
+    request.flush({ deletedIds: [21] });
+    expect(component.supportTickets.map(ticket => ticket.id)).toEqual([22]);
+    expect(component.selectedTicket).toBeNull();
+    expect(component.markedSupportTicketIds.size).toBe(0);
+    expect(component.isDeletingSupport).toBe(false);
+  });
+
+  it('deletes marked individual Support messages and preserves the other messages and conversation', () => {
+    const removed = '000000000000000000000001', kept = '000000000000000000000002';
+    const ticket = { id: 21, messages: [{ _id: removed, text: 'Delete' }, { _id: kept, text: 'Keep' }] };
+    component.supportTickets = [ticket];
+    component.selectTicket(ticket);
+    component.markSupportMessage(removed);
+    const confirm = vi.spyOn(component as any, 'openConfirmDialog');
+    component.deleteMarkedSupportMessages();
+    (confirm.mock.calls[0][0] as { onConfirm: () => void }).onConfirm();
+    const request = http.expectOne(req => req.method === 'DELETE' && req.url.endsWith('/support/tickets/21/messages'));
+    expect(request.request.body).toEqual({ message_ids: [removed] });
+    request.flush({ ticket: { ...ticket, messages: [ticket.messages[1]] }, deletedMessageIds: [removed] });
+    expect(component.selectedTicket.messages.map((message: any) => message._id)).toEqual([kept]);
+    expect(component.supportTickets.length).toBe(1);
+    expect(component.markedSupportMessageIds.size).toBe(0);
+  });
+
+  it('limits Support selection and deletion to superadmin and clears message marks when switching conversations', () => {
+    component.supportTickets = [{ id: 21, category: 'general', messages: [{ _id: 'first' }] }, { id: 22, category: 'appeal', messages: [] }];
+    component.selectTicket(component.supportTickets[0]);
+    auth.currentUser$.next({ id: 1, role: 'admin' });
+    const confirm = vi.spyOn(component as any, 'openConfirmDialog');
+    component.markAllSupportTickets();
+    component.markAllSupportMessages();
+    component.markSupportTicket(21);
+    component.markSupportMessage('first');
+    component.deleteMarkedSupportConversations();
+    component.deleteMarkedSupportMessages();
+    expect(component.markedSupportTicketIds.size).toBe(0);
+    expect(component.markedSupportMessageIds.size).toBe(0);
+    expect(confirm).not.toHaveBeenCalled();
+    auth.currentUser$.next({ id: 1, role: 'superadmin' });
+    component.supportCategoryFilter = 'general';
+    component.markAllSupportTickets();
+    expect([...component.markedSupportTicketIds]).toEqual([21]);
+    component.markAllSupportMessages();
+    expect(component.allSupportMessagesMarked).toBe(true);
+    component.selectTicket(component.supportTickets[1]);
+    expect(component.markedSupportMessageIds.size).toBe(0);
+  });
+
+  it('retains Support messages and marks when deletion is rejected', () => {
+    const ticket = { id: 21, messages: [{ _id: '000000000000000000000001', text: 'Keep on failure' }] };
+    component.selectTicket(ticket);
+    component.markSupportMessage(ticket.messages[0]._id);
+    const confirm = vi.spyOn(component as any, 'openConfirmDialog');
+    component.deleteMarkedSupportMessages();
+    (confirm.mock.calls[0][0] as { onConfirm: () => void }).onConfirm();
+    http.expectOne(req => req.method === 'DELETE').flush({ error: 'Unavailable' }, { status: 503, statusText: 'Unavailable' });
+    expect(component.selectedTicket.messages).toEqual(ticket.messages);
+    expect(component.markedSupportMessageIds.size).toBe(1);
+    expect(component.isDeletingSupport).toBe(false);
+  });
+
+  it('applies live Support deletions and prevents stale fetches from restoring removed conversations or messages', () => {
+    const removed = '000000000000000000000001', kept = '000000000000000000000002';
+    const oldTicket = { id: 21, messages: [{ _id: removed, text: 'Old' }, { _id: kept, text: 'Keep' }] };
+    component.supportTickets = [oldTicket, { id: 22, messages: [] }];
+    component.selectTicket(oldTicket);
+    component.activeTab = 'support';
+    component.fetchSupportTickets();
+    const request = http.expectOne(req => req.url.endsWith('/support/tickets'));
+    socket.supportTicketUpdated$.next({ ticket: { ...oldTicket, messages: [oldTicket.messages[1]] }, deletedMessageIds: [removed] });
+    socket.supportTicketsDeleted$.next({ ticketIds: [22] });
+    request.flush({ tickets: [oldTicket, { id: 22, messages: [] }] });
+    expect(component.supportTickets.map(ticket => ticket.id)).toEqual([21]);
+    expect(component.selectedTicket.messages.map((message: any) => message._id)).toEqual([kept]);
+    socket.supportTicketUpdated$.next({ ticket: { id: 22, messages: [] } });
+    expect(component.supportTickets.length).toBe(1);
+  });
+
+  it('deletes a completed transaction only after confirmation and leaves balances and totals unchanged', () => {
+    const tx: any = { id: 91, user_id: 7, type: 'deposit', status: 'completed', amount: 500 };
+    component.transactionsList = [tx];
+    component.userList = [user({ balance: 650 })];
+    component.stats.totalDeposits = 500;
+    const confirm = vi.spyOn(component as any, 'openConfirmDialog');
+    component.deleteCompletedTransaction(tx);
+    http.expectNone(req => req.method === 'DELETE');
+    (confirm.mock.calls[0][0] as { onConfirm: () => void }).onConfirm();
+    expect(component.deletingTransactionId).toBe(91);
+    http.expectOne(req => req.method === 'DELETE' && req.url.endsWith('/transactions/91')).flush({ transactionId: 91 });
+    expect(component.transactionsList).toEqual([]);
+    expect(component.userList[0].balance).toBe(650);
+    expect(component.stats.totalDeposits).toBe(500);
+    expect(component.deletingTransactionId).toBeNull();
+  });
+
+  it('does not allow ordinary admins or pending transactions to enter the delete flow and retains a rejected row', () => {
+    const tx: any = { id: 91, user_id: 7, type: 'deposit', status: 'completed', amount: 500 };
+    const confirm = vi.spyOn(component as any, 'openConfirmDialog');
+    auth.currentUser$.next({ id: 1, role: 'admin' });
+    component.deleteCompletedTransaction(tx);
+    auth.currentUser$.next({ id: 1, role: 'superadmin' });
+    component.deleteCompletedTransaction({ ...tx, status: 'pending' });
+    expect(confirm).not.toHaveBeenCalled();
+    component.transactionsList = [tx];
+    component.deleteCompletedTransaction(tx);
+    (confirm.mock.calls[0][0] as { onConfirm: () => void }).onConfirm();
+    http.expectOne(req => req.method === 'DELETE').flush({ error: 'Not permitted' }, { status: 403, statusText: 'Forbidden' });
+    expect(component.transactionsList).toEqual([tx]);
+    expect(component.deletingTransactionId).toBeNull();
+  });
+
+  it('removes live deletions and prevents an older in-flight response from restoring the row', () => {
+    const tx: any = { id: 91, user_id: 7, type: 'deposit', status: 'completed', amount: 500 };
+    component.transactionsList = [tx];
+    component.fetchTransactions();
+    const request = http.expectOne(req => req.url.includes('/api/admin/transactions?'));
+    socket.transactionsUpdated$.next({ action: 'transaction_deleted', transactionId: 91, userId: null });
+    expect(component.transactionsList).toEqual([]);
+    request.flush({ transactions: [tx] });
+    expect(component.transactionsList).toEqual([]);
+  });
+
   it('keeps a recent wallet event when an older user request finishes', () => {
     component.userList = [user()];
     component.fetchUsers();
@@ -141,10 +276,40 @@ describe('Admin dashboard live account management', () => {
     component.searchUsers();
     expect(component.displayedUsers.map(row => row.id)).toEqual([7]);
     expect(earlierRequest.cancelled).toBe(true);
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(300);
     const latestRequest = http.expectOne(request => request.url.includes('search=%2B254%20712%20345%20678'));
     latestRequest.flush({ users: [user()] });
     expect(component.isLoadingUsers).toBe(false);
+  });
+
+  it('coalesces a statistics event burst into one request', () => {
+    socket.dashboardStatsUpdated$.next({ action: 'bet_placed', userId: 7 });
+    socket.dashboardStatsUpdated$.next({ action: 'bet_cashout', userId: 7 });
+    http.expectNone(request => request.url.endsWith('/api/admin/stats'));
+    vi.advanceTimersByTime(150);
+    http.expectOne(request => request.url.endsWith('/api/admin/stats')).flush({ totalBets: 1 });
+  });
+
+  it('does not reload audit history for game activity, but refreshes it after an admin change', () => {
+    component.activeTab = 'logs';
+    socket.activityUpdated$.next({ action: 'bet_cashout', userId: 7 });
+    vi.advanceTimersByTime(150);
+    http.expectNone(request => request.url.endsWith('/api/admin/logs'));
+    socket.activityUpdated$.next({ action: 'user_role_updated', userId: 7 });
+    vi.advanceTimersByTime(150);
+    http.expectOne(request => request.url.endsWith('/api/admin/logs')).flush({ logs: [] });
+  });
+
+  it('reports a failed user search and clears the error when the admin retries', () => {
+    component.fetchUsers();
+    http.expectOne(request => request.url.includes('/api/admin/users?'))
+      .flush({ error: 'Unavailable' }, { status: 503, statusText: 'Unavailable' });
+    expect(component.isLoadingUsers).toBe(false);
+    expect(component.userLoadError).toContain('retry');
+    component.fetchUsers();
+    expect(component.userLoadError).toBe('');
+    http.expectOne(request => request.url.includes('/api/admin/users?')).flush({ users: [user()] });
+    expect(component.userList[0].id).toBe(7);
   });
 
   it('inserts a new deposit immediately and removes it when the status filter no longer matches', () => {
@@ -577,7 +742,7 @@ describe('Admin dashboard live account management', () => {
     };
     component.transactionsList = [tx];
 
-    component.claimTransactionTag(tx, 'K');
+    component.claimTransactionTag(tx, 'S');
     expect(component.pinDialogOpen).toBe(false);
     http.expectNone(r => r.url.endsWith('/api/admin/pin/unlock'));
     const flushPhoneRefresh = () => {
@@ -585,20 +750,20 @@ describe('Admin dashboard live account management', () => {
       http.expectOne(r => r.url.endsWith('/api/admin/support/tickets')).flush({ tickets: [] });
       http.expectOne(r => r.url.endsWith('/api/admin/online-players/summary')).flush({ onlineUsers: 0, connectedPlayers: 0, topPlayers: [], version: 0 });
     };
-    expect(tx.admin_tag).toBe('K');
+    expect(tx.admin_tag).toBe('S');
 
     const req = http.expectOne(r => r.url.endsWith('/api/admin/transactions/501/claim-tag'));
     expect(req.request.method).toBe('POST');
-    expect(req.request.body).toEqual({ tag: 'K' });
+    expect(req.request.body).toEqual({ tag: 'S' });
     expect(req.request.headers.has('X-Admin-Pin')).toBe(false);
-    req.flush({ message: 'Claimed', transactionId: 501, tag: 'K' });
+    req.flush({ message: 'Claimed', transactionId: 501, tag: 'S' });
     flushPhoneRefresh();
 
-    expect(tx.admin_tag).toBe('K');
+    expect(tx.admin_tag).toBe('S');
 
     // Attempting to claim again does nothing (immutable)
-    component.claimTransactionTag(tx, 'D');
-    expect(tx.admin_tag).toBe('K');
+    component.claimTransactionTag(tx, 'G');
+    expect(tx.admin_tag).toBe('S');
     http.expectNone(r => r.url.endsWith('/api/admin/transactions/501/claim-tag'));
   });
 
@@ -628,23 +793,23 @@ describe('Admin dashboard live account management', () => {
     http.expectNone(r => r.url.endsWith('/api/admin/overview'));
   });
 
-  it('keeps claims PIN-free after successfully saving the three PINs', () => {
+  it('keeps claims PIN-free after successfully saving the four PINs', () => {
     component.pinSetupOpen = true;
     component.ownerKeyInput = 'private-key';
-    component.setupPins = { R: '1357', D: '2468', K: '3690' };
+    component.setupPins = { R: '1357', G: '2468', S: '3690', V: '4826' };
     socket.connect.mockClear();
     socket.disconnect.mockClear();
     component.saveAdminPins();
-    http.expectOne(r => r.url.endsWith('/api/admin/pin/configure')).flush({ configuredTags: ['R', 'D', 'K'] });
+    http.expectOne(r => r.url.endsWith('/api/admin/pin/configure')).flush({ configuredTags: ['R', 'G', 'S', 'V'] });
     expect(component.pinSetupOpen).toBe(false);
     expect(component.pinBusy).toBe(false);
     expect(socket.disconnect).not.toHaveBeenCalled();
     const tx: any = { id: 502, user_id: 8, type: 'deposit', status: 'completed', admin_tag: null };
-    component.claimTransactionTag(tx, 'D');
+    component.claimTransactionTag(tx, 'G');
     expect(component.pinDialogOpen).toBe(false);
     const claim = http.expectOne(r => r.url.endsWith('/api/admin/transactions/502/claim-tag'));
     expect(claim.request.headers.has('X-Admin-Pin')).toBe(false);
-    claim.flush({ transactionId: 502, tag: 'D' }, { status: 500, statusText: 'Error' });
+    claim.flush({ transactionId: 502, tag: 'G' }, { status: 500, statusText: 'Error' });
     expect(component.claimingTagTxId).toBeNull();
     expect(tx.admin_tag).toBeNull();
   });
@@ -671,6 +836,7 @@ describe('Admin dashboard live account management', () => {
     });
     http.expectOne(r => r.url.includes('/api/admin/transactions?')).flush({ transactions: [] });
 
+    // Change phone number if needed
     component.onPromptPhoneInputChange('0710714498');
     expect(component.promptPhoneMode).toBe('custom');
 
@@ -696,6 +862,7 @@ describe('Admin dashboard live account management', () => {
       configured: true, balance: 448, accountId: 12571, updatedAt: '2026-11-21T12:00:05.000Z'
     });
 
+    // Poll status and confirm deposit
     component.pollAdminPromptStatusNow();
     const statusReq = http.expectOne(r => r.url.endsWith('/api/admin/payment-prompt/status'));
     expect(statusReq.request.body).toEqual({ checkoutRequestId: 'ws_CO_42' });
@@ -713,5 +880,49 @@ describe('Admin dashboard live account management', () => {
     expect(component.promptTargetUser?.balance).toBe(1750);
     http.expectOne(r => r.url.includes('/api/admin/transactions?')).flush({ transactions: [] });
     http.expectOne(r => r.url.endsWith('/api/admin/stats')).flush({ totalDeposits: 500 });
+  });
+
+  it('adds and removes claiming admin initials and formats failed deposit diagnostics for admins', () => {
+    expect(component.allowedAdminTags).toEqual(['S', 'G', 'R', 'V']);
+
+    component.newClaimAdminTag = 'm';
+    component.addClaimAdminTag();
+    const addReq = http.expectOne(r => r.url.endsWith('/api/admin/claim-tags') && r.method === 'POST');
+    expect(addReq.request.body).toEqual({ tag: 'M' });
+    addReq.flush({ tag: 'M', tags: ['S', 'G', 'R', 'V', 'M'], message: 'Admin initial M added.' });
+    expect(component.allowedAdminTags).toEqual(['S', 'G', 'R', 'V', 'M']);
+    expect(component.newClaimAdminTag).toBe('');
+    const lbReqs1 = http.match(r => r.url.includes('/api/admin/leaderboard'));
+    lbReqs1[lbReqs1.length - 1].flush({
+      success: true, date: '2026-11-22', startDate: '2026-11-07', serverTime: 'now',
+      adminTags: ['S', 'G', 'R', 'V', 'M'], totalDayClaims: 0, totalDayVolume: 0, overallAvgTicket: 0, leadingAdmin: null, scoringFormula: '', leaderboard: []
+    });
+
+    component.removeClaimAdminTag('M');
+    const delReq = http.expectOne(r => r.url.endsWith('/api/admin/claim-tags/M') && r.method === 'DELETE');
+    delReq.flush({ tag: 'M', tags: ['S', 'G', 'R', 'V'], message: 'Admin initial M removed.' });
+    expect(component.allowedAdminTags).toEqual(['S', 'G', 'R', 'V']);
+    const lbReqs2 = http.match(r => r.url.includes('/api/admin/leaderboard'));
+    lbReqs2[lbReqs2.length - 1].flush({
+      success: true, date: '2026-11-22', startDate: '2026-11-07', serverTime: 'now',
+      adminTags: ['S', 'G', 'R', 'V'], totalDayClaims: 0, totalDayVolume: 0, overallAvgTicket: 0, leadingAdmin: null, scoringFormula: '', leaderboard: []
+    });
+
+    expect(component.getDepositDiagnosticTitle({
+      category: 'provider_funds', label: 'Insufficient provider wallet funds', provider: 'payhero', code: null, detail: 'Low service wallet balance'
+    })).toBe('Insufficient PayHero wallet funds');
+    expect(component.getDepositDiagnosticTitle({
+      category: 'customer_blocked', label: 'Customer blocked by provider', provider: 'nexuspay', code: null, detail: 'Blacklisted'
+    })).toBe('Customer blocked by Nexus Pay');
+    expect(component.getDepositDiagnosticTitle({
+      category: 'wrong_pin', label: 'Incorrect M-Pesa PIN', provider: 'payhero', code: '2001', detail: 'Wrong PIN'
+    })).toBe('Incorrect M-Pesa PIN');
+
+    // Ordinary admins cannot add or remove claiming admin initials
+    auth.currentUser$.next({ id: 2, username: 'ordinary-admin', balance: 0, role: 'admin' });
+    component.newClaimAdminTag = 'Z';
+    component.addClaimAdminTag();
+    component.removeClaimAdminTag('V');
+    http.expectNone(r => r.url.includes('/api/admin/claim-tags'));
   });
 });

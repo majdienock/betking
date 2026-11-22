@@ -2,6 +2,7 @@ import { Injectable, NgZone, inject } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
 import { BehaviorSubject } from 'rxjs';
 import { getBackendOrigin } from '../config/backend-url';
+import { retryTemporarySocketAuth, socketOptions } from './socket-options';
 import { maskClientPhoneNumbers } from './admin-pin.service';
 
 export type AdminRoundStatus = 'Waiting' | 'Running' | 'Crashed';
@@ -96,6 +97,7 @@ export interface AdminSnapshot {
 
 export interface AdminRealtimeEvent {
   action: string;
+  transactionId?: number;
   userId: number | null;
   occurredAt: string;
   balance?: number;
@@ -136,6 +138,14 @@ export interface AdminOnlinePlayersSummary {
   updatedAt: string;
 }
 
+export interface AdminDepositDiagnostic {
+  category: string;
+  label: string;
+  provider: 'payhero' | 'nexuspay' | null;
+  code: string | null;
+  detail: string | null;
+}
+
 export interface AdminTransactionUpdate {
   id?: number;
   user_id: number;
@@ -144,8 +154,9 @@ export interface AdminTransactionUpdate {
   type: string;
   amount: number;
   status: string;
+  admin_deposit_diagnostic?: AdminDepositDiagnostic | null;
   reference?: string;
-  admin_tag?: 'K' | 'D' | 'R' | null;
+  admin_tag?: string | null;
   admin_tagged_by?: number | null;
   admin_tagged_at?: string | null;
   created_at?: string;
@@ -157,6 +168,8 @@ export interface AdminDepositInitiatedEvent {
   phone: string;
   amount: number;
   depositId?: number;
+  transactionId?: number;
+  transaction?: AdminTransactionUpdate;
   timestamp: string;
 }
 
@@ -207,6 +220,7 @@ const EMPTY_CURRENT_ROUND: AdminCurrentRound = {
 export class AdminSocketService {
   private zone = inject(NgZone);
   private socket: Socket | null = null;
+  private verificationRetry: ReturnType<typeof setTimeout> | null = null;
   private get serverUrl(): string {
     return `${getBackendOrigin()}/admin`;
   }
@@ -230,12 +244,18 @@ export class AdminSocketService {
   public onlinePlayers$ = new BehaviorSubject<AdminOnlinePlayersSummary | null>(null);
   public accessRevoked$ = new BehaviorSubject<{ userId: number; reason: string } | null>(null);
   public predatorTextUpdate$ = new BehaviorSubject<string | null>(null);
-  public supportTicketUpdated$ = new BehaviorSubject<{ ticket: any } | null>(null);
+  public supportTicketUpdated$ = new BehaviorSubject<{ ticket: any; deletedMessageIds?: string[] } | null>(null);
+  public supportTicketsDeleted$ = new BehaviorSubject<{ ticketIds: number[] } | null>(null);
   public clientClaimed$ = new BehaviorSubject<{ userId: number; tag: string; transactionId?: number } | null>(null);
+  public leaderboardUpdated$ = new BehaviorSubject<{ date?: string; tag?: string; transactionId?: number } | null>(null);
+  public claimTagsUpdated$ = new BehaviorSubject<{ tags: string[] } | null>(null);
   public pinChanged$ = new BehaviorSubject<{ tags: string[] } | null>(null);
+  public timedCrashTimeoutUpdated$ = new BehaviorSubject<{ enabled: boolean } | null>(null);
 
   public connect(token: string, pinToken: string | null = null): void {
+    if (this.verificationRetry) clearTimeout(this.verificationRetry);
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
     }
@@ -243,22 +263,22 @@ export class AdminSocketService {
     this.clearRealtimeEvents();
 
     this.socket = io(this.serverUrl, {
-      auth: { token, pinToken },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000
+      ...socketOptions(),
+      auth: { token, pinToken }
     });
 
     this.listen('connect', () => {
+      if (this.verificationRetry) clearTimeout(this.verificationRetry);
       this.isConnected$.next(true);
       this.error$.next(null);
     });
 
     this.listen('connect_error', (err: Error) => {
+      if (this.verificationRetry) clearTimeout(this.verificationRetry);
       this.isConnected$.next(false);
       this.error$.next(err.message || 'Admin socket connection failed.');
+      const socket = this.socket;
+      this.verificationRetry = retryTemporarySocketAuth(err, socket, () => this.socket === socket);
     });
 
     this.listen('admin_snapshot', (snapshot: AdminSnapshot) => {
@@ -266,6 +286,12 @@ export class AdminSocketService {
     });
     this.listen('admin_client_claimed', (data: { userId: number; tag: string; transactionId?: number }) => {
       this.clientClaimed$.next(data);
+    });
+    this.listen('admin_leaderboard_updated', (data: { date?: string; tag?: string; transactionId?: number }) => {
+      this.leaderboardUpdated$.next(data);
+    });
+    this.listen('admin_claim_tags_updated', (data: { tags: string[] }) => {
+      this.claimTagsUpdated$.next(data);
     });
     this.listen('admin_pin_changed', (data: { tags: string[] }) => this.pinChanged$.next(data));
 
@@ -279,13 +305,13 @@ export class AdminSocketService {
 
     this.listen('admin_betting_countdown', (data: Pick<AdminNextRound, 'roundId' | 'countdownMs' | 'bettingClosesAt'>) => {
       const current = this.nextRound$.getValue();
-      if (current.roundId === data.roundId) {
-        this.nextRound$.next({
-          ...current,
-          countdownMs: data.countdownMs,
-          bettingClosesAt: data.bettingClosesAt
-        });
-      }
+      this.nextRound$.next({
+        ...current,
+        roundId: data.roundId || current.roundId,
+        nextRoundId: data.roundId || current.nextRoundId,
+        countdownMs: data.countdownMs,
+        bettingClosesAt: data.bettingClosesAt
+      });
     });
 
     this.listen('admin_round_status', (data: {
@@ -297,13 +323,13 @@ export class AdminSocketService {
       history: AdminHistoryRow[];
     }) => {
       const nextRound = this.nextRound$.getValue();
-      if (nextRound.roundId === data.roundId) {
-        this.nextRound$.next({
-          ...nextRound,
-          status: data.status,
-          countdownMs: data.status === 'Waiting' ? nextRound.countdownMs : 0
-        });
-      }
+      this.nextRound$.next({
+        ...nextRound,
+        roundId: data.roundId || nextRound.roundId,
+        nextRoundId: data.roundId || nextRound.nextRoundId,
+        status: data.status,
+        countdownMs: data.status === 'Waiting' ? nextRound.countdownMs : 0
+      });
 
       const currentRound = this.currentRound$.getValue();
       this.currentRound$.next({
@@ -370,8 +396,19 @@ export class AdminSocketService {
       }
     });
 
-    this.listen('support_ticket_update', (data: { ticket: any }) => {
+    this.listen('support_ticket_update', (data: { ticket: any; deletedMessageIds?: string[] }) => {
       this.supportTicketUpdated$.next(data);
+    });
+    this.listen('support_tickets_deleted', (data: { ticketIds: number[] }) => {
+      this.supportTicketsDeleted$.next(data);
+    });
+
+    this.listen('timed_crash_timeout_status', (data: { enabled: boolean }) => {
+      this.timedCrashTimeoutUpdated$.next(data);
+    });
+
+    this.listen('timed_crash_timeout_updated', (data: { enabled: boolean }) => {
+      this.timedCrashTimeoutUpdated$.next(data);
     });
 
     this.listen('admin_access_revoked', (data: { userId: number; reason: string }) => {
@@ -402,8 +439,16 @@ export class AdminSocketService {
     }
   }
 
+  public toggleTimedCrashTimeout(enabled: boolean): void {
+    if (this.socket && this.socket.connected) {
+      this.socket.emit('admin_toggle_timed_crash_timeout', { enabled });
+    }
+  }
+
   public disconnect(): void {
+    if (this.verificationRetry) clearTimeout(this.verificationRetry);
     if (this.socket) {
+      this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
     }
@@ -439,8 +484,12 @@ export class AdminSocketService {
     this.onlinePlayers$.next(null);
     this.accessRevoked$.next(null);
     this.supportTicketUpdated$.next(null);
+    this.supportTicketsDeleted$.next(null);
+    this.leaderboardUpdated$.next(null);
+    this.claimTagsUpdated$.next(null);
     this.clientClaimed$.next(null);
     this.pinChanged$.next(null);
+    this.timedCrashTimeoutUpdated$.next(null);
   }
 
   private applySnapshot(snapshot: AdminSnapshot): void {

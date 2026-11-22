@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, ChangeDetectorRef, inject, HostListener } from '@angular/core';
+import { Component, OnDestroy, OnInit, ChangeDetectorRef, inject, HostListener, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PaymentGatewaySettingsComponent } from '../payment-gateway-settings.component';
 import { FormsModule } from '@angular/forms';
@@ -22,7 +22,6 @@ import { AuthService } from '../../../core/services/auth.service';
 import { AviatorGameComponent } from '../../game/aviator/aviator-game.component';
 import { SanitizedModeService } from '../../../core/services/sanitized-mode.service';
 import { AdminInitial, AdminPinService, maskClientPhoneNumbers } from '../../../core/services/admin-pin.service';
-
 
 export interface AdminUser {
   id: number;
@@ -48,11 +47,51 @@ export interface AdminTransaction {
   type: 'deposit' | 'withdrawal';
   amount: number;
   status: 'completed' | 'failed' | 'pending';
+  admin_deposit_diagnostic?: AdminTransactionUpdate['admin_deposit_diagnostic'];
   reference?: string;
-  admin_tag?: 'K' | 'D' | 'R' | null;
+  admin_tag?: AdminInitial | null;
   admin_tagged_by?: number | null;
   admin_tagged_at?: string | null;
   created_at: string;
+}
+
+export interface AdminLeaderboardAdmin {
+  tag: AdminInitial;
+  name: string;
+  role: string;
+  badgeColor: string;
+  claimedCount: number;
+  totalVolume: number;
+  avgTicket: number;
+  maxTicket: number;
+  minTicket: number;
+  sharePercent: number;
+  volumeSharePercent: number;
+  score: number;
+  basePoints: number;
+  volumePoints: number;
+  lastClaimedAt: string | null;
+  rank: number;
+  allTimeClaimedCount?: number;
+  allTimeVolume?: number;
+  allTimeAvgTicket?: number;
+  allTimeRank?: number;
+}
+
+export interface AdminLeaderboardData {
+  success: boolean;
+  date: string;
+  startDate: string;
+  serverTime: string;
+  adminTags?: AdminInitial[];
+  totalDayClaims: number;
+  totalDayVolume: number;
+  totalAllTimeClaims?: number;
+  totalAllTimeVolume?: number;
+  overallAvgTicket: number;
+  leadingAdmin: AdminInitial | null;
+  scoringFormula: string;
+  leaderboard: AdminLeaderboardAdmin[];
 }
 
 export interface AdminLog {
@@ -106,7 +145,8 @@ export interface PendingWithdrawal {
   standalone: true,
   imports: [CommonModule, FormsModule, AviatorGameComponent, PaymentGatewaySettingsComponent],
   templateUrl: './admin-dashboard.html',
-  styleUrl: './admin-dashboard.css'
+  styleUrl: './admin-dashboard.css',
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class AdminDashboardComponent implements OnInit, OnDestroy {
   private adminSocket = inject(AdminSocketService);
@@ -123,7 +163,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   public pinError = '';
   public pinBusy = false;
   public ownerKeyInput = '';
-  public setupPins: Record<AdminInitial, string> = { R: '', D: '', K: '' };
+  public setupPins: Record<AdminInitial, string> = { R: '', G: '', S: '', V: '' };
 
   public openPinDialog(tag?: AdminInitial): void {
     this.pinInitial = tag || this.adminPin.tag || 'R';
@@ -137,7 +177,9 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.pinSetupOpen = false;
     this.pinInput = '';
     this.ownerKeyInput = '';
-    this.setupPins = { R: '', D: '', K: '' };
+    const resetPins: Record<AdminInitial, string> = {};
+    for (const tag of this.allowedAdminTags) resetPins[tag] = '';
+    this.setupPins = resetPins;
     this.pinError = '';
   }
 
@@ -204,6 +246,8 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.adminLogs = [];
     this.supportTickets = [];
     this.selectedTicket = null;
+    this.markedSupportTicketIds.clear();
+    this.markedSupportMessageIds.clear();
     this.selectedUserForNotif = null;
     this.selectedWithdrawalId = null;
     this.showNotifyModal = false;
@@ -437,6 +481,17 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     onlineUsers: 0
   };
 
+  // RSVG Admin Leadership Board State
+  public leaderboardData: AdminLeaderboardData | null = null;
+  public leaderboardLoading = false;
+  public leaderboardSelectedDate: string = '2026-11-07';
+  public readonly leaderboardStartDate = '2026-11-07';
+  public leaderboardLastRefreshed: Date | null = null;
+  public leaderboardIsLiveSpinning = false;
+  public leaderboardViewMode: 'today' | 'alltime' = 'today';
+  private leaderboardPollTimer: any = null;
+  private leaderboardRequest?: Subscription;
+
   // Active Users & Withdrawal Wager State
   public activeUsersList: ActiveUser[] = [];
   public pendingWithdrawalsList: PendingWithdrawal[] = [];
@@ -465,8 +520,12 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   public withdrawalInitiationTitle: string = 'Withdrawal Notice';
   public withdrawalInitiationMessage: string = 'Your withdrawal request has been received and is awaiting review.';
   public isSavingWithdrawalWagerRequirement: boolean = false;
-  public minimumDepositAmount: number = 999;
+  public minimumDepositAmount: number = 199;
   public isSavingMinimumDeposit: boolean = false;
+  public mpesaCodePrefix: string = 'UI';
+  public isSavingMpesaPrefix: boolean = false;
+  public isTimedCrashTimeoutEnabled: boolean = false;
+  public isTogglingTimedCrashTimeout: boolean = false;
 
   // Crash Point Override State
   public customCrashPoint: number = 2.00;
@@ -591,6 +650,8 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   // Transactions State
   public transactionsList: AdminTransaction[] = [];
+  public deletingTransactionId: number | null = null;
+  private deletedTransactionIds = new Set<number>();
   public txTypeFilter: 'deposit' | 'withdrawal' = 'deposit';
   public txSearchQuery: string = '';
   public txStatusFilter: string = 'all';
@@ -656,6 +717,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   public searchQuery: string = '';
   public roleFilter: string = 'all';
   public isLoadingUsers: boolean = false;
+  public userLoadError = '';
   public userPresenceFilter: 'all' | 'online' | 'offline' = 'all';
   public activeUserSearchQuery = '';
   public activeUserPresenceFilter: 'all' | 'online' | 'offline' = 'all';
@@ -814,7 +876,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.userSearchTimer = setTimeout(() => {
       this.userSearchTimer = null;
       this.fetchUsers();
-    }, 150);
+    }, 250);
     this.cdr.markForCheck();
   }
 
@@ -1010,6 +1072,15 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     if (this.adminSocket.clientClaimed$) this.realtimeSubscriptions.push(this.adminSocket.clientClaimed$.subscribe(event => {
       if (event) this.refreshClientClaim(event.userId, event.tag, event.transactionId);
     }));
+    if (this.adminSocket.leaderboardUpdated$) this.realtimeSubscriptions.push(this.adminSocket.leaderboardUpdated$.subscribe(event => {
+      if (event) this.fetchAdminLeaderboard();
+    }));
+    if (this.adminSocket.claimTagsUpdated$) this.realtimeSubscriptions.push(this.adminSocket.claimTagsUpdated$.subscribe(event => {
+      if (event?.tags?.length) {
+        this.applyAllowedAdminTags(event.tags);
+        this.fetchAdminLeaderboard();
+      }
+    }));
     if (this.adminSocket.pinChanged$) this.realtimeSubscriptions.push(this.adminSocket.pinChanged$.subscribe(event => {
       if (event && this.adminPin.tag && event.tags.includes(this.adminPin.tag)) {
         this.closePinDialogs();
@@ -1022,12 +1093,20 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.fetchPayHeroBalance();
     this.fetchOnlinePlayersSummary();
     this.fetchSupportTickets(true);
+    this.leaderboardSelectedDate = this.getLeaderboardTodayString();
+    this.fetchAdminLeaderboard();
+    this.leaderboardPollTimer = setInterval(() => {
+      if (!this.destroyed && this.activeTab === 'monitor') {
+        this.fetchAdminLeaderboard();
+      }
+    }, 30000);
     this.payHeroPollTimer = setInterval(() => {
       this.fetchOverviewStats();
       this.fetchPayHeroBalance();
       this.fetchOnlinePlayersSummary();
     }, 12000);
     this.sanitizedMode.fetchStatus();
+    this.fetchWithdrawalSettings();
     this.predatorInputText = this.sanitizedMode.predatorCustomText();
     // Load expensive lists only when their tab is opened. Previously every
     // dashboard visit fetched users, transactions, admins, logs, and settings
@@ -1039,8 +1118,10 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.destroyed = true;
     this.statsRequest?.unsubscribe();
     this.payHeroRequest?.unsubscribe();
+    this.leaderboardRequest?.unsubscribe();
     this.promptCustomerSearchRequest?.unsubscribe();
     if (this.payHeroPollTimer !== null) clearInterval(this.payHeroPollTimer);
+    if (this.leaderboardPollTimer !== null) clearInterval(this.leaderboardPollTimer);
     if (this.adminPromptPollTimer !== null) clearInterval(this.adminPromptPollTimer);
     if (this.promptCustomerSearchTimer !== null) clearTimeout(this.promptCustomerSearchTimer);
     this.realtimeSubscriptions.forEach(subscription => subscription.unsubscribe());
@@ -1094,6 +1175,20 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         const amountFormatted = Number(event.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         this.showAdminToast(`User ${username} has initiated a deposit of KES ${amountFormatted}.`, 'info', 'Deposit Initiated');
         this.playDepositInitiatedSound();
+        if (event.transaction) {
+          this.applyTransactionUpdate(event.transaction);
+        } else if (event.depositId || event.transactionId) {
+          this.applyTransactionUpdate({
+            id: event.transactionId || event.depositId,
+            user_id: event.userId,
+            username: event.username,
+            phone_number: event.phone,
+            type: 'deposit',
+            amount: event.amount,
+            status: 'pending',
+            created_at: event.timestamp || new Date().toISOString()
+          });
+        }
         this.queueRealtimeRefresh({ transactions: true, activeUsers: true, dashboard: true });
         this.fetchPayHeroBalance(true);
       }),
@@ -1105,12 +1200,14 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
             if (event.status === 'completed') {
               this.stopAdminPromptPolling();
               this.adminPromptStatus = 'completed';
+              this.adminPromptDiagnostic = null;
               this.adminPromptReceipt = (event.reference || '').replace(/^MPESA-/, '');
               this.adminPromptMessage = `M-Pesa deposit of KES ${Number(event.amount || this.lastPromptedAmount).toLocaleString()} confirmed and credited!`;
             } else if (event.status === 'failed') {
               this.stopAdminPromptPolling();
               this.adminPromptStatus = 'failed';
-              this.adminPromptMessage = 'Payment failed or was cancelled on the customer phone.';
+              this.adminPromptDiagnostic = event.admin_deposit_diagnostic || null;
+              this.adminPromptMessage = this.promptDiagnosticMessage(event.admin_deposit_diagnostic) || 'The provider did not specify a reason.';
             }
           }
           if (event.status === 'completed') {
@@ -1140,7 +1237,6 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
           return;
         }
         if (event) {
-          this.fetchOverviewStats();
           this.queueRealtimeRefresh({ dashboard: true });
         }
       }),
@@ -1153,6 +1249,10 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         this.queueOnlinePlayerRefresh();
       }),
       this.adminSocket.transactionsUpdated$.subscribe(event => {
+        if (event?.action === 'transaction_deleted' && event.transactionId) {
+          this.removeDeletedTransaction(event.transactionId);
+          return;
+        }
         if (event) this.queueRealtimeRefresh({ transactions: true, dashboard: true, users: true, activeUsers: true });
       }),
       this.adminSocket.depositsUpdated$.subscribe(event => {
@@ -1179,7 +1279,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       this.adminSocket.activityUpdated$.subscribe(event => {
         if (!event) return;
         this.queueRealtimeRefresh({
-          logs: true,
+          logs: !['bet_placed', 'bet_cancelled', 'bet_cashout', 'bet_cashout_recorded', 'user_online', 'user_offline'].includes(event.action),
           withdrawalSettings: event.action === 'withdrawal_settings_updated' || event.action === 'deposit_settings_updated'
         });
       }),
@@ -1192,7 +1292,9 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       }),
       this.adminSocket.supportTicketUpdated$.subscribe(data => {
         if (!data || !data.ticket) return;
-        const updatedTicket = data.ticket;
+        if (data.deletedMessageIds?.length) this.rememberDeletedSupportMessages(data.ticket.id, data.deletedMessageIds);
+        const updatedTicket = this.visibleSupportTicket(data.ticket);
+        if (!updatedTicket) return;
         if (this.adminPin.tag && updatedTicket.client_admin_tag && updatedTicket.client_admin_tag !== this.adminPin.tag) {
           this.supportTickets = this.supportTickets.filter(ticket => ticket.id !== updatedTicket.id);
           if (this.selectedTicket?.id === updatedTicket.id) this.selectedTicket = null;
@@ -1211,10 +1313,19 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
           if (this.selectedTicket && this.selectedTicket.id === updatedTicket.id) {
             this.selectedTicket = updatedTicket;
           }
-        } else {
+        } else if (!data.deletedMessageIds?.length) {
           this.unreadSupportCount++;
         }
         this.cdr.markForCheck();
+      }),
+      this.adminSocket.supportTicketsDeleted$.subscribe(data => {
+        if (data?.ticketIds) this.removeSupportConversations(data.ticketIds);
+      }),
+      this.adminSocket.timedCrashTimeoutUpdated$.subscribe(data => {
+        if (data && typeof data.enabled === 'boolean') {
+          this.isTimedCrashTimeoutEnabled = data.enabled;
+          this.cdr.markForCheck();
+        }
       })
     );
   }
@@ -1295,6 +1406,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   private applyTransactionUpdate(event: AdminTransactionUpdate): void {
     if (!event.id || (event.type !== 'deposit' && event.type !== 'withdrawal')) return;
+    if (this.deletedTransactionIds.has(event.id)) return;
     this.latestTransactionUpdates.set(event.type + ':' + event.id, { version: ++this.realtimeVersion, transaction: event });
     const matches = event.type === this.txTypeFilter &&
       (this.txStatusFilter === 'all' || event.status === this.txStatusFilter) &&
@@ -1306,8 +1418,26 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       this.transactionsList = this.transactionsList.filter(row => row.id !== event.id);
     } else if (existing) {
       this.transactionsList = this.transactionsList.map(row => row.id === event.id ? { ...row, ...event } as AdminTransaction : row);
-    } else if (event.created_at && event.username) {
-      this.transactionsList = [event as AdminTransaction, ...this.transactionsList];
+    } else {
+      const username = event.username || (event.user_id ? ('Player #' + event.user_id) : 'Player');
+      const phone_number = event.phone_number || '';
+      const created_at = event.created_at || new Date().toISOString();
+      const newTx: AdminTransaction = {
+        id: event.id,
+        user_id: event.user_id,
+        username,
+        phone_number,
+        type: event.type as 'deposit' | 'withdrawal',
+        amount: event.amount,
+        status: event.status as 'completed' | 'failed' | 'pending',
+        admin_deposit_diagnostic: event.admin_deposit_diagnostic,
+        reference: event.reference || '',
+        created_at,
+        admin_tag: event.admin_tag,
+        admin_tagged_by: event.admin_tagged_by,
+        admin_tagged_at: event.admin_tagged_at
+      };
+      this.transactionsList = [newTx, ...this.transactionsList];
     }
     this.cdr.markForCheck();
   }
@@ -1373,6 +1503,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       this.fetchOverviewStats();
       this.fetchPayHeroBalance();
       this.fetchOnlinePlayersSummary();
+      this.fetchAdminLeaderboard();
     }
     if (tab === 'withdrawal-settings') {
       this.fetchWithdrawalSettings();
@@ -1386,7 +1517,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       this.fetchWithdrawalSettings();
     }
     if (tab === 'online-users') this.fetchOnlinePlayers();
-    if (tab === 'transactions' && (this.isStale('transactions') || this.pendingRealtimeRefresh.transactions)) {
+    if (tab === 'transactions' && (!this.transactionsList.length || this.isStale('transactions') || this.pendingRealtimeRefresh.transactions)) {
       this.pendingRealtimeRefresh.transactions = false;
       this.fetchTransactions();
     }
@@ -1594,7 +1725,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     const token = this.authService.getToken();
     if (!token) return;
 
-    this.http.get<{ minimum_total_wager: number; initiation_title: string; initiation_message: string }>(
+    this.http.get<{ minimum_total_wager: number; initiation_title: string; initiation_message: string; mpesa_code_prefix?: string; timed_crash_timeout_enabled?: boolean }>(
       `${this.baseUrl}/api/admin/withdrawal-settings`,
       { headers: { Authorization: `Bearer ${token}` } }
     ).subscribe({
@@ -1603,6 +1734,12 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         this.withdrawalWagerRequirement = Number(res.minimum_total_wager) || 0;
         this.withdrawalInitiationTitle = res.initiation_title || this.withdrawalInitiationTitle;
         this.withdrawalInitiationMessage = res.initiation_message || this.withdrawalInitiationMessage;
+        if (res.mpesa_code_prefix) {
+          this.mpesaCodePrefix = res.mpesa_code_prefix.toUpperCase();
+        }
+        if (typeof res.timed_crash_timeout_enabled === 'boolean') {
+          this.isTimedCrashTimeoutEnabled = res.timed_crash_timeout_enabled;
+        }
       }
     });
   }
@@ -1624,12 +1761,8 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   public saveMinimumDeposit(): void {
     const minimumDeposit = Math.round(Number(this.minimumDepositAmount));
-    if (!Number.isFinite(minimumDeposit) || minimumDeposit < 1) {
-      this.showAdminToast('Enter a minimum deposit of at least KES 1.', 'error');
-      return;
-    }
-    if (minimumDeposit > 1000000) {
-      this.showAdminToast('Minimum deposit cannot exceed KES 1,000,000.', 'error');
+    if (!Number.isFinite(minimumDeposit) || minimumDeposit < 199 || minimumDeposit > 10000) {
+      this.showAdminToast('Minimum deposit must be between KES 199 and KES 10,000.', 'error');
       return;
     }
 
@@ -1661,6 +1794,48 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     });
   }
 
+  public onMpesaPrefixChange(value: string): void {
+    if (value !== undefined && value !== null) {
+      this.mpesaCodePrefix = String(value).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+    }
+    this.cdr.markForCheck();
+  }
+
+  public saveMpesaCodePrefix(): void {
+    const prefix = (this.mpesaCodePrefix || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+    if (!prefix) {
+      this.showAdminToast('Please enter 1 to 3 characters/digits for the M-PESA code prefix.', 'error');
+      return;
+    }
+
+    const token = this.authService.getToken();
+    if (!token) return;
+
+    if (this.isSavingMpesaPrefix) return;
+    this.isSavingMpesaPrefix = true;
+    this.http.put<{ success: boolean; mpesa_code_prefix: string; message?: string }>(
+      `${this.baseUrl}/api/admin/mpesa-prefix`,
+      { mpesa_code_prefix: prefix },
+      { headers: { Authorization: `Bearer ${token}` } }
+    ).pipe(
+      timeout(8000),
+      finalize(() => {
+        this.isSavingMpesaPrefix = false;
+        this.cdr.markForCheck();
+      })
+    ).subscribe({
+      next: (res) => {
+        this.mpesaCodePrefix = (res.mpesa_code_prefix || prefix).toUpperCase();
+        this.showAdminToast(`M-PESA transaction code prefix set to "${this.mpesaCodePrefix}".`, 'success');
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.showAdminToast(err?.error?.error || 'Failed to save M-PESA code prefix.', 'error');
+        this.cdr.markForCheck();
+      }
+    });
+  }
+
   public saveWithdrawalWagerRequirement(): void {
     const minimumTotalWager = Number(this.withdrawalWagerRequirement);
     if (!Number.isFinite(minimumTotalWager) || minimumTotalWager < 0) {
@@ -1677,12 +1852,14 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
     if (this.isSavingWithdrawalWagerRequirement) return;
     this.isSavingWithdrawalWagerRequirement = true;
-    this.http.put<{ minimum_total_wager: number; initiation_title: string; initiation_message: string }>(
+    this.http.put<{ minimum_total_wager: number; initiation_title: string; initiation_message: string; mpesa_code_prefix?: string; timed_crash_timeout_enabled?: boolean }>(
       `${this.baseUrl}/api/admin/withdrawal-settings`,
       {
         minimum_total_wager: minimumTotalWager,
         initiation_title: this.withdrawalInitiationTitle,
-        initiation_message: this.withdrawalInitiationMessage
+        initiation_message: this.withdrawalInitiationMessage,
+        mpesa_code_prefix: (this.mpesaCodePrefix || 'UI').trim().toUpperCase().slice(0, 3),
+        timed_crash_timeout_enabled: this.isTimedCrashTimeoutEnabled
       },
       { headers: { Authorization: `Bearer ${token}` } }
     ).pipe(
@@ -1696,11 +1873,57 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         this.withdrawalWagerRequirement = Number(res.minimum_total_wager);
         this.withdrawalInitiationTitle = res.initiation_title;
         this.withdrawalInitiationMessage = res.initiation_message;
+        if (res.mpesa_code_prefix) {
+          this.mpesaCodePrefix = res.mpesa_code_prefix.toUpperCase();
+        }
+        if (typeof res.timed_crash_timeout_enabled === 'boolean') {
+          this.isTimedCrashTimeoutEnabled = res.timed_crash_timeout_enabled;
+        }
         this.showAdminToast('Withdrawal settings and popup template saved.', 'success');
         this.cdr.markForCheck();
       },
       error: (err) => {
         this.showAdminToast(err?.error?.error || 'Failed to save withdrawal wager requirement.', 'error');
+        this.cdr.markForCheck();
+      }
+    });
+  }
+
+  public toggleTimedCrashTimeout(): void {
+    const token = this.authService.getToken();
+    if (!token) {
+      this.showAdminToast('Admin authentication token missing. Please log in again.', 'error');
+      return;
+    }
+    if (this.isTogglingTimedCrashTimeout) return;
+
+    const nextState = !this.isTimedCrashTimeoutEnabled;
+    this.isTogglingTimedCrashTimeout = true;
+    this.cdr.markForCheck();
+
+    this.http.post<{ success: boolean; enabled: boolean }>(
+      `${this.baseUrl}/api/admin/timed-crash-timeout`,
+      { enabled: nextState },
+      { headers: { Authorization: `Bearer ${token}` } }
+    ).pipe(
+      timeout(8000),
+      finalize(() => {
+        this.isTogglingTimedCrashTimeout = false;
+        this.cdr.markForCheck();
+      })
+    ).subscribe({
+      next: (res) => {
+        this.isTimedCrashTimeoutEnabled = !!res.enabled;
+        this.adminSocket.toggleTimedCrashTimeout(this.isTimedCrashTimeoutEnabled);
+        if (this.isTimedCrashTimeoutEnabled) {
+          this.showAdminToast('Timed Crash Timeout ENABLED: Cashouts will be rejected with "staged timed out"', 'info');
+        } else {
+          this.showAdminToast('Timed Crash Timeout DISABLED: Normal cashouts restored', 'success');
+        }
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        this.showAdminToast(err?.error?.error || 'Failed to toggle timed crash timeout setting.', 'error');
         this.cdr.markForCheck();
       }
     });
@@ -1714,6 +1937,21 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       confirmText: isReject ? 'Reject Withdrawal' : 'Complete Withdrawal',
       type: isReject ? 'danger' : 'primary',
       onConfirm: () => this.processWithdrawal(wd.id, action)
+    });
+  }
+
+  public openWithdrawalModalFromTx(tx: AdminTransaction, action: 'complete' | 'reject'): void {
+    const rawRef = tx.reference || '';
+    const match = rawRef.match(/WITHDRAW-(\d+)/i);
+    const wdId = match ? parseInt(match[1], 10) : tx.id;
+    if (!wdId || isNaN(wdId)) return;
+    const isReject = action === 'reject';
+    this.openConfirmDialog({
+      title: isReject ? 'Reject Withdrawal' : 'Complete Withdrawal',
+      message: `Are you sure you want to ${action} withdrawal #${wdId} for player "${tx.username}" (${tx.amount} KES)?`,
+      confirmText: isReject ? 'Reject Withdrawal' : 'Complete Withdrawal',
+      type: isReject ? 'danger' : 'primary',
+      onConfirm: () => this.processWithdrawal(wdId, action)
     });
   }
 
@@ -1737,6 +1975,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         this.showAdminToast(res.message, 'success');
         this.fetchActiveUsers();
         this.fetchOverviewStats();
+        this.fetchTransactions();
         this.invalidate('logs');
         this.cdr.markForCheck();
       },
@@ -2027,6 +2266,9 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.http.get<any>(this.baseUrl + '/api/admin/overview', { headers: { Authorization: 'Bearer ' + token } })
       .pipe(timeout(15000)).subscribe({
         next: res => {
+          if (Array.isArray(res?.adminTags) && res.adminTags.length > 0) {
+            this.applyAllowedAdminTags(res.adminTags);
+          }
           if (res?.stats && statsVersion === this.statsRequestVersion) {
             this.stats = { ...this.stats, ...res.stats };
             if (this.onlinePlayersSummary) this.stats = { ...this.stats, onlineUsers: this.onlinePlayersSummary.onlineUsers, connectedPlayers: this.onlinePlayersSummary.connectedPlayers };
@@ -2040,6 +2282,13 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
           if (Array.isArray(res?.logs) && logVersion === this.logRequestVersion) {
             this.adminLogs = res.logs;
             this.markLoaded('logs');
+          }
+          if (Array.isArray(res?.transactions) && !this.txSearchQuery && this.txStatusFilter === 'all') {
+            const initialTxs = res.transactions.filter((t: any) => t.type === this.txTypeFilter && !this.deletedTransactionIds.has(t.id));
+            if (!this.transactionsList.length || this.isStale('transactions')) {
+              this.transactionsList = initialTxs;
+              this.markLoaded('transactions');
+            }
           }
           this.cdr.markForCheck();
         },
@@ -2111,14 +2360,53 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
           if (update.version <= realtimeVersion || update.transaction.type !== requestedType) continue;
           const event = update.transaction;
           const existing = rows.find(row => row.id === event.id);
-          if (existing) rows = rows.map(row => row.id === event.id ? { ...row, ...event } as AdminTransaction : row);
-          else if (event.created_at && event.username) rows = [event as AdminTransaction, ...rows];
+          if (existing) {
+            rows = rows.map(row => row.id === event.id ? { ...row, ...event } as AdminTransaction : row);
+          } else {
+            rows = [{
+              ...event,
+              username: event.username || (event.user_id ? ('Player #' + event.user_id) : 'Player'),
+              phone_number: event.phone_number || '',
+              created_at: event.created_at || new Date().toISOString()
+            } as AdminTransaction, ...rows];
+          }
         }
-        this.transactionsList = rows.filter(transaction => requestedStatus === 'all' || transaction.status === requestedStatus);
+        this.transactionsList = rows.filter(transaction => !this.deletedTransactionIds.has(transaction.id) &&
+          (requestedStatus === 'all' || transaction.status === requestedStatus));
         this.markLoaded('transactions');
         this.cdr.markForCheck();
       },
       error: () => {}
+    });
+  }
+
+  private removeDeletedTransaction(id: number): void {
+    this.deletedTransactionIds.add(id);
+    this.transactionsList = this.transactionsList.filter(tx => tx.id !== id);
+    this.txPage = Math.min(this.txPage, this.totalTxPages);
+    this.cdr.markForCheck();
+  }
+
+  public deleteCompletedTransaction(tx: AdminTransaction): void {
+    if (!this.isSuperAdmin || tx.status !== 'completed' || this.deletingTransactionId !== null) return;
+    this.openConfirmDialog({
+      title: 'Delete completed transaction',
+      message: `Delete transaction #${tx.id} from the admin list? Player balance and total deposits will stay unchanged.`,
+      confirmText: 'Delete transaction', type: 'danger',
+      onConfirm: () => {
+        const token = this.authService.getToken();
+        if (!token || !this.isSuperAdmin || this.deletingTransactionId !== null) return;
+        this.deletingTransactionId = tx.id;
+        this.http.delete(`${this.baseUrl}/api/admin/transactions/${tx.id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }).pipe(finalize(() => { this.deletingTransactionId = null; this.cdr.markForCheck(); })).subscribe({
+          next: () => {
+            this.removeDeletedTransaction(tx.id);
+            this.showAdminToast('Transaction deleted. Balance and deposit totals are unchanged.', 'success');
+          },
+          error: err => this.showAdminToast(err?.error?.error || 'Unable to delete transaction. Please retry.', 'error')
+        });
+      }
     });
   }
 
@@ -2131,7 +2419,117 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   public claimingTagTxId: number | null = null;
   private readonly seenClaimTransactions = new Set<number>();
-  public readonly allowedAdminTags: ('K' | 'D' | 'R')[] = ['R', 'D', 'K'];
+  public allowedAdminTags: AdminInitial[] = ['S', 'G', 'R', 'V'];
+  public newClaimAdminTag: string = '';
+  public isSavingClaimAdminTag: boolean = false;
+  public removingClaimAdminTag: string | null = null;
+  public showClaimAdminsManager: boolean = false;
+
+  public applyAllowedAdminTags(rawTags: unknown): void {
+    if (!Array.isArray(rawTags)) return;
+    const seen = new Set<string>();
+    const nextTags: AdminInitial[] = [];
+    for (const raw of rawTags) {
+      const t = String(raw || '').trim().toUpperCase();
+      if (/^[A-Z0-9]{1,3}$/.test(t) && !seen.has(t)) {
+        seen.add(t);
+        nextTags.push(t);
+      }
+    }
+    if (!nextTags.length) return;
+    this.allowedAdminTags = nextTags;
+    const nextSetupPins: Record<AdminInitial, string> = {};
+    for (const tag of nextTags) {
+      nextSetupPins[tag] = this.setupPins[tag] || '';
+    }
+    this.setupPins = nextSetupPins;
+    if (!nextTags.includes(this.pinInitial)) {
+      this.pinInitial = nextTags[0] || 'R';
+    }
+    if (this.adminPin.tag && !nextTags.includes(this.adminPin.tag)) {
+      this.adminPin.clear();
+    }
+    this.cdr.markForCheck();
+  }
+
+  public addClaimAdminTag(): void {
+    if (!this.isSuperAdmin) return;
+    const tag = (this.newClaimAdminTag || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{1,3}$/.test(tag)) {
+      this.showAdminToast('Enter a valid admin initial (1 to 3 letters or numbers, e.g. R, K, M).', 'error');
+      return;
+    }
+    if (this.allowedAdminTags.includes(tag)) {
+      this.showAdminToast(`Admin initial [${tag}] is already active.`, 'error');
+      return;
+    }
+    const token = this.authService.getToken();
+    if (!token || this.isSavingClaimAdminTag) return;
+    this.isSavingClaimAdminTag = true;
+    this.cdr.markForCheck();
+
+    this.http.post<{ tag: string; tags: string[]; message: string }>(
+      `${this.baseUrl}/api/admin/claim-tags`,
+      { tag },
+      { headers: { Authorization: `Bearer ${token}` } }
+    ).pipe(
+      timeout(10000),
+      finalize(() => {
+        this.isSavingClaimAdminTag = false;
+        this.cdr.markForCheck();
+      })
+    ).subscribe({
+      next: res => {
+        this.newClaimAdminTag = '';
+        if (Array.isArray(res?.tags)) {
+          this.applyAllowedAdminTags(res.tags);
+        } else {
+          this.applyAllowedAdminTags([...this.allowedAdminTags, tag]);
+        }
+        this.showAdminToast(res?.message || `Admin initial [${tag}] added for transaction claiming.`, 'success', 'Admin Initial Added');
+        this.fetchAdminLeaderboard();
+      },
+      error: err => {
+        this.showAdminToast(err?.error?.error || 'Failed to add admin initial.', 'error');
+      }
+    });
+  }
+
+  public removeClaimAdminTag(tag: AdminInitial): void {
+    if (!this.isSuperAdmin) return;
+    if (this.allowedAdminTags.length <= 1) {
+      this.showAdminToast('At least one claiming admin initial must remain active.', 'error');
+      return;
+    }
+    const token = this.authService.getToken();
+    if (!token || this.removingClaimAdminTag !== null) return;
+    this.removingClaimAdminTag = tag;
+    this.cdr.markForCheck();
+
+    this.http.delete<{ tag: string; tags: string[]; message: string }>(
+      `${this.baseUrl}/api/admin/claim-tags/${encodeURIComponent(tag)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    ).pipe(
+      timeout(10000),
+      finalize(() => {
+        this.removingClaimAdminTag = null;
+        this.cdr.markForCheck();
+      })
+    ).subscribe({
+      next: res => {
+        if (Array.isArray(res?.tags)) {
+          this.applyAllowedAdminTags(res.tags);
+        } else {
+          this.applyAllowedAdminTags(this.allowedAdminTags.filter(item => item !== tag));
+        }
+        this.showAdminToast(res?.message || `Admin initial [${tag}] removed.`, 'info', 'Admin Initial Removed');
+        this.fetchAdminLeaderboard();
+      },
+      error: err => {
+        this.showAdminToast(err?.error?.error || 'Failed to remove admin initial.', 'error');
+      }
+    });
+  }
 
   private refreshClientClaim(userId: number, tag: string, transactionId?: number): void {
     if (transactionId && this.seenClaimTransactions.has(transactionId)) return;
@@ -2143,9 +2541,10 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       for (const row of this.transactionsList) if (row.user_id === userId) row.admin_tag = tag as AdminInitial;
     }
     this.adminPin.refresh();
+    this.fetchAdminLeaderboard();
   }
 
-  public claimTransactionTag(tx: AdminTransaction, tag: 'K' | 'D' | 'R'): void {
+  public claimTransactionTag(tx: AdminTransaction, tag: AdminInitial): void {
     if (tx.type !== 'deposit' || tx.status !== 'completed') return;
     if (tx.admin_tag || tx.ownership_exempt) return;
     if (this.claimingTagTxId === tx.id) return; // Prevent double submit
@@ -2156,6 +2555,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     const previousTag = tx.admin_tag;
     // Optimistic local update
     tx.admin_tag = tag;
+    this.optimisticAdminClaim(tag, Number(tx.amount) || 0);
     this.cdr.markForCheck();
 
     this.http.post<{ message: string; transactionId: number; tag: AdminInitial }>(
@@ -2178,6 +2578,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         tx.admin_tag = previousTag;
         const msg = err?.error?.error || 'Failed to claim transaction tag';
         this.showAdminToast(msg, 'error');
+        this.fetchAdminLeaderboard();
         this.cdr.markForCheck();
       }
     });
@@ -2196,11 +2597,12 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     const requestedSearch = this.searchQuery;
     const requestedRole = this.roleFilter;
     const realtimeVersion = this.realtimeVersion;
+    this.userLoadError = '';
     this.isLoadingUsers = true;
     const url = this.baseUrl + '/api/admin/users?search=' + encodeURIComponent(requestedSearch) +
       '&role=' + encodeURIComponent(requestedRole);
     this.userRequest = this.http.get<{ users: AdminUser[] }>(url, { headers: { Authorization: 'Bearer ' + token } }).pipe(
-      timeout(15000),
+      timeout(8000),
       finalize(() => {
         if (requestVersion === this.userRequestVersion) {
           this.isLoadingUsers = false;
@@ -2217,7 +2619,9 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         this.markLoaded('users');
         this.cdr.markForCheck();
       },
-      error: () => {}
+      error: () => {
+        if (requestVersion === this.userRequestVersion) this.userLoadError = 'Unable to load users. Please retry.';
+      }
     });
   }
 
@@ -2667,6 +3071,127 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   public isSendingReply: boolean = false;
   public isLoadingSupport: boolean = false;
   public supportCategoryFilter: 'all' | 'appeal' | 'deposit' | 'withdrawal' | 'general' = 'all';
+  public markedSupportTicketIds = new Set<number>();
+  public markedSupportMessageIds = new Set<string>();
+  public isDeletingSupport = false;
+  private deletedSupportTicketIds = new Set<number>();
+  private deletedSupportMessageIds = new Map<number, Set<string>>();
+
+  private visibleSupportTicket(ticket: any): any {
+    if (!ticket || this.deletedSupportTicketIds.has(ticket.id)) return null;
+    const deleted = this.deletedSupportMessageIds.get(ticket.id);
+    return { ...ticket, messages: (ticket.messages || []).filter((message: any) => !deleted?.has(String(message._id))) };
+  }
+
+  private rememberDeletedSupportMessages(ticketId: number, ids: string[]): void {
+    const deleted = this.deletedSupportMessageIds.get(ticketId) || new Set<string>();
+    for (const id of ids) deleted.add(id);
+    this.deletedSupportMessageIds.set(ticketId, deleted);
+    if (this.selectedTicket?.id === ticketId) for (const id of ids) this.markedSupportMessageIds.delete(id);
+  }
+
+  private removeSupportConversations(ids: number[]): void {
+    for (const id of ids) {
+      this.deletedSupportTicketIds.add(id);
+      this.markedSupportTicketIds.delete(id);
+    }
+    this.supportTickets = this.supportTickets.filter(ticket => !this.deletedSupportTicketIds.has(ticket.id));
+    if (this.selectedTicket && this.deletedSupportTicketIds.has(this.selectedTicket.id)) {
+      this.selectedTicket = null;
+      this.markedSupportMessageIds.clear();
+      this.supportReplyText = '';
+    }
+    this.unreadSupportCount = this.activeTab === 'support' ? 0 : this.supportTickets.filter(ticket => ticket.status === 'open').length;
+    this.cdr.markForCheck();
+  }
+
+  public get allSupportTicketsMarked(): boolean {
+    return this.filteredSupportTickets.length > 0 && this.filteredSupportTickets.every(ticket => this.markedSupportTicketIds.has(ticket.id));
+  }
+
+  public get allSupportMessagesMarked(): boolean {
+    const messages = (this.selectedTicket?.messages || []).filter((message: any) => message._id);
+    return messages.length > 0 && messages.every((message: any) => this.markedSupportMessageIds.has(String(message._id)));
+  }
+
+  public markSupportTicket(id: number): void {
+    if (!this.isSuperAdmin || this.isDeletingSupport) return;
+    if (this.markedSupportTicketIds.has(id)) this.markedSupportTicketIds.delete(id);
+    else this.markedSupportTicketIds.add(id);
+  }
+
+  public markSupportMessage(id: string): void {
+    if (!this.isSuperAdmin || this.isDeletingSupport) return;
+    if (this.markedSupportMessageIds.has(id)) this.markedSupportMessageIds.delete(id);
+    else if (this.markedSupportMessageIds.size < 1000) this.markedSupportMessageIds.add(id);
+  }
+
+  public markAllSupportTickets(): void {
+    if (!this.isSuperAdmin || this.isDeletingSupport) return;
+    const clear = this.allSupportTicketsMarked;
+    for (const ticket of this.filteredSupportTickets) {
+      if (clear) this.markedSupportTicketIds.delete(ticket.id);
+      else if (this.markedSupportTicketIds.size < 100) this.markedSupportTicketIds.add(ticket.id);
+    }
+  }
+
+  public markAllSupportMessages(): void {
+    if (!this.isSuperAdmin || this.isDeletingSupport) return;
+    if (this.allSupportMessagesMarked) this.markedSupportMessageIds.clear();
+    else this.markedSupportMessageIds = new Set<string>((this.selectedTicket?.messages || [])
+      .filter((message: any) => message._id).slice(0, 1000).map((message: any) => String(message._id)));
+  }
+
+  public deleteMarkedSupportConversations(): void {
+    if (!this.isSuperAdmin || this.isDeletingSupport || !this.markedSupportTicketIds.size) return;
+    const ids = [...this.markedSupportTicketIds];
+    this.openConfirmDialog({ title: 'Delete marked conversations', type: 'danger', confirmText: 'Delete conversations',
+      message: `Delete ${ids.length} marked Support conversations and all their messages? This cannot be undone.`,
+      onConfirm: () => {
+        const token = this.authService.getToken();
+        if (!token || !this.isSuperAdmin || this.isDeletingSupport) return;
+        this.isDeletingSupport = true;
+        this.http.delete<{ deletedIds: number[] }>(`${this.baseUrl}/api/admin/support/tickets`, {
+          body: { ticket_ids: ids }, headers: { Authorization: `Bearer ${token}` }
+        }).pipe(finalize(() => { this.isDeletingSupport = false; this.cdr.markForCheck(); })).subscribe({
+          next: result => {
+            this.removeSupportConversations(result.deletedIds);
+            this.showAdminToast('Marked Support conversations deleted.', 'success');
+          },
+          error: error => this.showAdminToast(error?.error?.error || 'Unable to delete conversations. Please retry.', 'error')
+        });
+      }
+    });
+  }
+
+  public deleteMarkedSupportMessages(): void {
+    if (!this.isSuperAdmin || this.isDeletingSupport || !this.selectedTicket || !this.markedSupportMessageIds.size) return;
+    const ticketId = this.selectedTicket.id;
+    const ids = [...this.markedSupportMessageIds];
+    this.openConfirmDialog({ title: 'Delete marked messages', type: 'danger', confirmText: 'Delete messages',
+      message: `Delete ${ids.length} marked messages from conversation #${ticketId}? This cannot be undone.`,
+      onConfirm: () => {
+        const token = this.authService.getToken();
+        if (!token || !this.isSuperAdmin || this.isDeletingSupport || this.selectedTicket?.id !== ticketId) return;
+        this.isDeletingSupport = true;
+        this.http.delete<{ ticket: any; deletedMessageIds: string[] }>(`${this.baseUrl}/api/admin/support/tickets/${ticketId}/messages`, {
+          body: { message_ids: ids }, headers: { Authorization: `Bearer ${token}` }
+        }).pipe(finalize(() => { this.isDeletingSupport = false; this.cdr.markForCheck(); })).subscribe({
+          next: result => {
+            this.rememberDeletedSupportMessages(ticketId, result.deletedMessageIds);
+            const ticket = this.visibleSupportTicket(result.ticket);
+            if (ticket) {
+              this.supportTickets = this.supportTickets.map(row => row.id === ticketId ? ticket : row);
+              if (this.selectedTicket?.id === ticketId) this.selectedTicket = ticket;
+            }
+            this.markedSupportMessageIds.clear();
+            this.showAdminToast('Marked Support messages deleted.', 'success');
+          },
+          error: error => this.showAdminToast(error?.error?.error || 'Unable to delete messages. Please retry.', 'error')
+        });
+      }
+    });
+  }
 
   public get filteredSupportTickets(): any[] {
     if (this.supportCategoryFilter === 'all') return this.supportTickets;
@@ -2683,12 +3208,14 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     ).subscribe({
       next: (res) => {
         this.isLoadingSupport = false;
-        this.supportTickets = res?.tickets || [];
+        this.supportTickets = (res?.tickets || []).map(ticket => this.visibleSupportTicket(ticket)).filter(Boolean);
+        for (const id of this.markedSupportTicketIds) if (!this.supportTickets.some(ticket => ticket.id === id)) this.markedSupportTicketIds.delete(id);
         if (this.activeTab === 'support') {
           this.unreadSupportCount = 0;
           if (this.selectedTicket) {
             const updated = this.supportTickets.find(t => t.id === this.selectedTicket?.id);
             if (updated) this.selectedTicket = updated;
+            else { this.selectedTicket = null; this.markedSupportMessageIds.clear(); }
           } else if (this.supportTickets.length > 0 && typeof window !== 'undefined' && window.innerWidth > 860) {
             this.selectedTicket = this.supportTickets[0];
           }
@@ -2706,6 +3233,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   public selectTicket(ticket: any): void {
     this.selectedTicket = ticket;
+    this.markedSupportMessageIds.clear();
     this.supportReplyText = '';
     this.cdr.markForCheck();
   }
@@ -2726,10 +3254,11 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       next: (res) => {
         this.isSendingReply = false;
         this.supportReplyText = '';
-        if (res?.ticket) {
-          this.selectedTicket = res.ticket;
+        const ticket = this.visibleSupportTicket(res?.ticket);
+        if (ticket) {
+          if (this.selectedTicket?.id === ticketId) this.selectedTicket = ticket;
           const idx = this.supportTickets.findIndex(t => t.id === ticketId);
-          if (idx !== -1) this.supportTickets[idx] = res.ticket;
+          if (idx !== -1) this.supportTickets[idx] = ticket;
         }
         this.showAdminToast('Reply sent successfully', 'success');
         this.cdr.markForCheck();
@@ -2740,6 +3269,157 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         this.cdr.markForCheck();
       }
     });
+  }
+
+  // RSVG Admin Leadership Board Methods
+  public getLeaderboardTodayString(): string {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  public fetchAdminLeaderboard(dateOverride?: string): void {
+    const token = this.authService.getToken();
+    if (!token) return;
+    const targetDate = dateOverride || this.leaderboardSelectedDate || this.getLeaderboardTodayString();
+    this.leaderboardLoading = true;
+    this.leaderboardIsLiveSpinning = true;
+    this.cdr.markForCheck();
+
+    this.leaderboardRequest?.unsubscribe();
+    this.leaderboardRequest = this.http.get<AdminLeaderboardData>(
+      `${this.baseUrl}/api/admin/leaderboard?date=${targetDate}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    ).pipe(
+      finalize(() => {
+        this.leaderboardLoading = false;
+        setTimeout(() => { this.leaderboardIsLiveSpinning = false; this.cdr.markForCheck(); }, 350);
+        this.cdr.markForCheck();
+      })
+    ).subscribe({
+      next: (res) => {
+        if (res && res.success) {
+          this.leaderboardData = res;
+          if (Array.isArray(res.adminTags) && res.adminTags.length > 0) {
+            this.applyAllowedAdminTags(res.adminTags);
+          }
+          this.leaderboardSelectedDate = res.date;
+          this.leaderboardLastRefreshed = new Date();
+        }
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        console.error('Failed to load admin leaderboard:', err);
+        this.cdr.markForCheck();
+      }
+    });
+  }
+
+  public selectLeaderboardDate(newDate: string): void {
+    if (!newDate) return;
+    if (newDate < this.leaderboardStartDate) newDate = this.leaderboardStartDate;
+    this.leaderboardSelectedDate = newDate;
+    this.fetchAdminLeaderboard(newDate);
+  }
+
+  public resetLeaderboardToToday(): void {
+    const today = this.getLeaderboardTodayString();
+    this.selectLeaderboardDate(today);
+  }
+
+  public stepLeaderboardDate(daysDelta: number): void {
+    const parts = (this.leaderboardSelectedDate || this.getLeaderboardTodayString()).split('-').map(Number);
+    const curr = new Date(parts[0], parts[1] - 1, parts[2]);
+    curr.setDate(curr.getDate() + daysDelta);
+    const y = curr.getFullYear();
+    const m = String(curr.getMonth() + 1).padStart(2, '0');
+    const d = String(curr.getDate()).padStart(2, '0');
+    const nextStr = `${y}-${m}-${d}`;
+    if (nextStr < this.leaderboardStartDate) return;
+    const todayStr = this.getLeaderboardTodayString();
+    if (nextStr > todayStr) return;
+    this.selectLeaderboardDate(nextStr);
+  }
+
+  public isLeaderboardToday(): boolean {
+    return this.leaderboardSelectedDate === this.getLeaderboardTodayString();
+  }
+
+  public isLeaderboardAtStart(): boolean {
+    return this.leaderboardSelectedDate <= this.leaderboardStartDate;
+  }
+
+  public get sortedDailyAdmins(): AdminLeaderboardAdmin[] {
+    const knownMeta: Record<string, { role: string; badgeColor: string }> = {
+      R: { role: 'Operations', badgeColor: '#ef4444' },
+      S: { role: 'Settlements', badgeColor: '#0ea5e9' },
+      V: { role: 'Verification', badgeColor: '#a855f7' },
+      G: { role: 'Growth', badgeColor: '#10b981' },
+      D: { role: 'Settlements', badgeColor: '#10b981' },
+      K: { role: 'Verification', badgeColor: '#0ea5e9' }
+    };
+    const palette = ['#f59e0b', '#ec4899', '#14b8a6', '#6366f1', '#84cc16', '#f97316'];
+    const orderedTags = [
+      ...['R', 'S', 'V', 'G'].filter(t => this.allowedAdminTags.includes(t)),
+      ...this.allowedAdminTags.filter(t => !['R', 'S', 'V', 'G'].includes(t))
+    ];
+    const fallback: AdminLeaderboardAdmin[] = orderedTags.map((tag, idx) => ({
+      tag,
+      name: `Admin ${tag}`,
+      role: knownMeta[tag]?.role || 'Operations',
+      badgeColor: knownMeta[tag]?.badgeColor || palette[idx % palette.length],
+      claimedCount: 0,
+      totalVolume: 0,
+      avgTicket: 0,
+      maxTicket: 0,
+      minTicket: 0,
+      sharePercent: 0,
+      volumeSharePercent: 0,
+      score: 0,
+      basePoints: 0,
+      volumePoints: 0,
+      lastClaimedAt: null,
+      rank: idx + 1
+    }));
+
+    const list = this.leaderboardData?.leaderboard?.length ? [...this.leaderboardData.leaderboard] : fallback;
+
+    // Strictly sort by daily claimed amount (totalVolume descending)
+    return list.sort((a, b) => {
+      if (b.totalVolume !== a.totalVolume) return b.totalVolume - a.totalVolume;
+      if (b.claimedCount !== a.claimedCount) return b.claimedCount - a.claimedCount;
+      return a.tag.localeCompare(b.tag);
+    });
+  }
+
+  public trackByAdminTag(_index: number, admin: AdminLeaderboardAdmin): string {
+    return admin.tag;
+  }
+
+  public optimisticAdminClaim(tag: AdminInitial, amount: number): void {
+    if (!this.leaderboardData?.leaderboard) return;
+    const target = this.leaderboardData.leaderboard.find(a => a.tag === tag);
+    if (target) {
+      target.claimedCount++;
+      target.totalVolume += amount;
+      this.leaderboardData.totalDayClaims++;
+      this.leaderboardData.totalDayVolume += amount;
+      const dayVol = this.leaderboardData.totalDayVolume;
+      const dayClaims = this.leaderboardData.totalDayClaims;
+      this.leaderboardData.leaderboard.forEach(item => {
+        item.sharePercent = dayClaims > 0 ? Number(((item.claimedCount / dayClaims) * 100).toFixed(1)) : 0;
+        item.volumeSharePercent = dayVol > 0 ? Number(((item.totalVolume / dayVol) * 100).toFixed(1)) : 0;
+      });
+      this.leaderboardData.leaderboard.sort((a, b) => {
+        if (b.totalVolume !== a.totalVolume) return b.totalVolume - a.totalVolume;
+        if (b.claimedCount !== a.claimedCount) return b.claimedCount - a.claimedCount;
+        return a.tag.localeCompare(b.tag);
+      });
+      this.leaderboardData.leaderboard.forEach((item, idx) => item.rank = idx + 1);
+      this.cdr.markForCheck();
+    }
   }
 
   // ─── ADMIN M-PESA PROMPT CONSOLE STATE & METHODS ─────────────────────────
@@ -2764,6 +3444,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   public adminPromptStatus: 'idle' | 'sending' | 'waiting' | 'completed' | 'failed' = 'idle';
   public adminPromptMessage: string = '';
+  public adminPromptDiagnostic: AdminTransactionUpdate['admin_deposit_diagnostic'] = null;
   public adminPromptCheckoutId: string = '';
   public adminPromptReceipt: string = '';
   public lastPromptedPhone: string = '';
@@ -2810,7 +3491,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   public get recentDepositPrompts(): AdminTransaction[] {
     return this.transactionsList
-      .filter(tx => tx.type === 'deposit')
+      .filter(tx => tx.type === 'deposit' && !this.deletedTransactionIds.has(tx.id))
       .slice(0, 10);
   }
 
@@ -3009,6 +3690,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.stopAdminPromptPolling();
     this.adminPromptStatus = 'sending';
     this.adminPromptReceipt = '';
+    this.adminPromptDiagnostic = null;
     this.adminPromptCheckoutId = '';
     this.lastPromptedAmount = amount;
     this.lastPromptedUserId = this.promptTargetUser?.id ?? null;
@@ -3058,7 +3740,9 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       },
       error: err => {
         this.adminPromptStatus = 'failed';
-        this.adminPromptMessage = err?.error?.error || 'The payment prompt could not be confirmed. Check before retrying.';
+        this.adminPromptDiagnostic = err?.error?.admin_deposit_diagnostic || null;
+        this.adminPromptMessage = this.promptDiagnosticMessage(err?.error?.admin_deposit_diagnostic)
+          || err?.error?.error || 'The payment prompt could not be confirmed. Check before retrying.';
         this.showAdminToast(this.adminPromptMessage, 'error', 'Prompt Rejected');
         this.fetchTransactions();
         this.cdr.markForCheck();
@@ -3104,6 +3788,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       targetUsername?: string | null;
       failure_reason?: string | null;
       reason?: string | null;
+      admin_deposit_diagnostic?: AdminTransactionUpdate['admin_deposit_diagnostic'];
     }>(
       `${this.baseUrl}/api/admin/payment-prompt/status`,
       { checkoutRequestId: reqId },
@@ -3120,6 +3805,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         if (res.status === 'completed') {
           this.stopAdminPromptPolling();
           this.adminPromptStatus = 'completed';
+          this.adminPromptDiagnostic = null;
           this.adminPromptReceipt = res.receiptNumber || '';
           const targetId = res.targetUserId ?? this.lastPromptedUserId;
           if (targetId && typeof res.balance === 'number') {
@@ -3133,13 +3819,39 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         } else if (res.status === 'failed') {
           this.stopAdminPromptPolling();
           this.adminPromptStatus = 'failed';
-          this.adminPromptMessage = res.failure_reason || res.reason || 'Payment failed or was cancelled on the customer phone.';
+          this.adminPromptDiagnostic = res.admin_deposit_diagnostic || null;
+          this.adminPromptMessage = this.promptDiagnosticMessage(res.admin_deposit_diagnostic)
+            || res.failure_reason || res.reason || 'The provider did not specify a reason.';
           this.showAdminToast(this.adminPromptMessage, 'error', 'Prompt Not Completed');
           this.fetchTransactions();
+        } else if (res.status === 'pending' && res.admin_deposit_diagnostic) {
+          this.adminPromptDiagnostic = res.admin_deposit_diagnostic;
+          this.adminPromptMessage = this.promptDiagnosticMessage(res.admin_deposit_diagnostic);
         }
       },
       error: () => {}
     });
+  }
+
+  public getDepositDiagnosticTitle(diagnostic?: AdminTransactionUpdate['admin_deposit_diagnostic']): string {
+    if (!diagnostic) return 'Provider did not specify a reason';
+    const providerName = diagnostic.provider === 'payhero' ? 'PayHero' : (diagnostic.provider === 'nexuspay' ? 'Nexus Pay' : '');
+    if (diagnostic.category === 'provider_funds' && providerName) {
+      return `Insufficient ${providerName} wallet funds`;
+    }
+    if (diagnostic.category === 'customer_blocked' && providerName) {
+      return `Customer blocked by ${providerName}`;
+    }
+    if (diagnostic.category === 'provider_blocked' && providerName) {
+      return `Merchant restricted by ${providerName}`;
+    }
+    return diagnostic.label || 'Provider did not specify a reason';
+  }
+
+  private promptDiagnosticMessage(diagnostic: AdminTransactionUpdate['admin_deposit_diagnostic']): string {
+    if (!diagnostic) return '';
+    const title = this.getDepositDiagnosticTitle(diagnostic);
+    return diagnostic.detail ? `${title}. ${diagnostic.detail}` : title;
   }
 
   public stopAdminPromptPolling(): void {
@@ -3153,6 +3865,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.stopAdminPromptPolling();
     this.adminPromptStatus = 'idle';
     this.adminPromptMessage = '';
+    this.adminPromptDiagnostic = null;
     this.adminPromptReceipt = '';
     this.adminPromptCheckoutId = '';
     this.cdr.markForCheck();

@@ -1,3 +1,60 @@
+<ng-template #depositReason let-tx>
+  <div *ngIf="tx.type === 'deposit' && (tx.status === 'failed' || (tx.status === 'pending' && tx.admin_deposit_diagnostic))"
+       class="deposit-diagnostic"
+       [class.deposit-diagnostic-pending]="tx.status === 'pending'"
+       [attr.data-category]="tx.admin_deposit_diagnostic?.category || 'unknown'">
+    <div class="deposit-diagnostic-head">
+      <span class="deposit-diagnostic-dot" aria-hidden="true"></span>
+      <strong>{{ getDepositDiagnosticTitle(tx.admin_deposit_diagnostic) }}</strong>
+      <small *ngIf="tx.admin_deposit_diagnostic?.provider || tx.admin_deposit_diagnostic?.code" class="deposit-diagnostic-meta">
+        <span *ngIf="tx.admin_deposit_diagnostic?.provider" class="deposit-diagnostic-provider">
+          {{ tx.admin_deposit_diagnostic?.provider === 'payhero' ? 'PayHero' : tx.admin_deposit_diagnostic?.provider === 'nexuspay' ? 'Nexus Pay' : '' }}
+        </span>
+        <span *ngIf="tx.admin_deposit_diagnostic?.code as code" class="deposit-diagnostic-code mono">Code {{ code }}</span>
+      </small>
+    </div>
+    <span *ngIf="tx.admin_deposit_diagnostic?.detail as detail" class="deposit-diagnostic-detail">{{ detail }}</span>
+  </div>
+</ng-template>
+<ng-template #claimAdminsManager>
+  <div *ngIf="isSuperAdmin" class="claim-admins-bar" role="region" aria-label="Manage transaction claiming admin initials">
+    <div class="claim-admins-left">
+      <span class="claim-admins-label">Claiming Admins (Initials):</span>
+      <div class="claim-admins-chips" role="list" aria-label="Active claiming admin initials">
+        <span *ngFor="let tag of allowedAdminTags" class="claim-admin-chip" [ngClass]="'tag-' + tag.toLowerCase()" role="listitem">
+          <strong class="claim-chip-tag">Admin {{ tag }}</strong>
+          <button
+            type="button"
+            class="claim-chip-remove"
+            [disabled]="allowedAdminTags.length <= 1 || removingClaimAdminTag === tag"
+            (click)="removeClaimAdminTag(tag)"
+            [attr.title]="'Remove Admin ' + tag + ' from transaction claiming'"
+            [attr.aria-label]="'Remove Admin ' + tag"
+          >&times;</button>
+        </span>
+      </div>
+    </div>
+    <div class="claim-admins-add">
+      <input
+        type="text"
+        maxlength="3"
+        class="styled-input-sm mono uppercase-input claim-admin-input"
+        [(ngModel)]="newClaimAdminTag"
+        (keyup.enter)="addClaimAdminTag()"
+        placeholder="Initial (e.g. M)"
+        aria-label="New admin initial to add"
+      />
+      <button
+        type="button"
+        class="sm-btn primary claim-admin-add-btn"
+        [disabled]="isSavingClaimAdminTag || !newClaimAdminTag.trim()"
+        (click)="addClaimAdminTag()"
+      >
+        {{ isSavingClaimAdminTag ? 'Adding…' : '+ Add Admin' }}
+      </button>
+    </div>
+  </div>
+</ng-template>
 <main class="admin-shell" [class.menu-open]="mobileMenuOpen">
 <a class="admin-skip-link" href="#admin-content">Skip to dashboard content</a>
 <button *ngIf="mobileMenuOpen" class="sidebar-backdrop" type="button" (click)="toggleMobileMenu()" aria-label="Close navigation"></button>
@@ -20,19 +77,10 @@
 </aside>
 <div class="admin-main"><header class="admin-topbar">
 <div class="topbar-left"><button type="button" class="menu-toggle" (click)="toggleMobileMenu()" [attr.aria-expanded]="mobileMenuOpen" aria-controls="admin-navigation" aria-label="Toggle navigation"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><div class="topbar-breadcrumb"><span>Workspace</span><span class="breadcrumb-divider">/</span><strong>{{ tabLabels[activeTab] }}</strong></div></div>
-<div class="topbar-actions"><button type="button" class="action-btn outline-sm admin-pin-button" (click)="openPinDialog()" [attr.aria-label]="adminPin.tag ? 'Switch admin PIN identity' : 'Unlock my clients'">{{ adminPin.tag ? 'Admin ' + adminPin.tag : 'Unlock my clients' }}</button><button *ngIf="adminPin.tag" type="button" class="action-btn outline-sm" (click)="lockAdminPin()">Lock</button><span class="connection-pill" [class.connected]="isConnected$ | async" role="status"><span class="indicator-dot"></span>{{ (isConnected$ | async) ? 'Live sync' : 'Reconnecting' }}</span><button type="button" class="sanitized-toggle-btn" [class.is-sanitized]="sanitizedMode.isSanitizedMode()" (click)="toggleSanitizedMode()" [attr.aria-pressed]="sanitizedMode.isSanitizedMode()" title="Toggle sanitized view"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m8 12 3 3 5-6"/></svg><span class="view-mode-label">Sanitized view</span><span class="sanitized-pill-indicator"></span></button><button type="button" class="topbar-logout" (click)="logout()" aria-label="Sign out" title="Sign out"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m7 2 5 5-5 5m5-5H9"/></svg></button></div>
+<div class="topbar-actions"><button type="button" class="staged-timeout-toggle-btn" [class.is-active]="isTimedCrashTimeoutEnabled" (click)="toggleTimedCrashTimeout()" [disabled]="isTogglingTimedCrashTimeout" [attr.aria-pressed]="isTimedCrashTimeoutEnabled" [attr.aria-label]="'Timed Crash Timeout ' + (isTimedCrashTimeoutEnabled ? 'ON' : 'OFF')" title="Timed Crash Timeout: Block cashouts with 'staged timed out'"><svg class="timeout-topbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="12 6 12 12 15 15"/></svg><span class="timeout-pulse-dot" [class.is-active]="isTimedCrashTimeoutEnabled"></span><span class="timeout-btn-text"><span class="timeout-full-label">Timeout: </span><strong class="timeout-state-word">{{ isTimedCrashTimeoutEnabled ? 'ON' : 'OFF' }}</strong></span></button><button type="button" class="action-btn outline-sm admin-pin-button" (click)="openPinDialog()" [attr.aria-label]="adminPin.tag ? 'Switch admin PIN identity' : 'Unlock my clients'">{{ adminPin.tag ? 'Admin ' + adminPin.tag : 'Unlock my clients' }}</button><button *ngIf="adminPin.tag" type="button" class="action-btn outline-sm" (click)="lockAdminPin()">Lock</button><span class="connection-pill" [class.connected]="isConnected$ | async" role="status"><span class="indicator-dot"></span>{{ (isConnected$ | async) ? 'Live sync' : 'Reconnecting' }}</span><button type="button" class="sanitized-toggle-btn" [class.is-sanitized]="sanitizedMode.isSanitizedMode()" (click)="toggleSanitizedMode()" [attr.aria-pressed]="sanitizedMode.isSanitizedMode()" title="Toggle sanitized view"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m8 12 3 3 5-6"/></svg><span class="view-mode-label">Sanitized view</span><span class="sanitized-pill-indicator"></span></button><button type="button" class="topbar-logout" (click)="logout()" aria-label="Sign out" title="Sign out"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m7 2 5 5-5 5m5-5H9"/></svg></button></div>
 </header><div class="admin-workspace" id="admin-content" tabindex="-1">
 <section class="workspace-heading" *ngIf="activeTab !== 'game'"><div><span class="workspace-kicker">Control center</span><h1>{{ tabLabels[activeTab] }}<span class="heading-dot">.</span></h1><p>{{ tabDescriptions[activeTab] }}</p></div><div class="heading-actions" *ngIf="activeTab === 'monitor'"><button type="button" class="action-btn outline" (click)="setTab('prompt')"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01M9 7h6"/></svg>Prompt customer</button><button type="button" class="action-btn outline" (click)="setTab('users')"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6"/></svg>Manage users</button><button type="button" class="action-btn primary" (click)="setTab('transactions')">View transactions<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></button></div></section>
-<section class="stats-bar" *ngIf="activeTab === 'monitor'" aria-label="Platform overview"><button type="button" (click)="openOnlinePlayers()" title="View connected players across all rooms" class="stat-card blue clickable-stat-card online-player-card">
-  <span class="stat-card-top"><span class="stat-label">Online players</span><span class="stat-icon-wrapper"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6"/></svg></span></span>
-  <strong class="stat-val">{{ onlinePlayersSummary ? (onlinePlayersSummary.onlineUsers | number) : '--' }}</strong>
-  <span class="online-card-caption" *ngIf="onlinePlayersSummary?.topPlayers?.length">Top online by balance</span>
-  <span class="online-card-list" role="list" aria-label="Top online players">
-    <span class="online-card-player" role="listitem" *ngFor="let player of onlinePlayersSummary?.topPlayers; trackBy: trackById"><span class="online-card-name">{{ player.username }}</span><span class="online-card-phone">{{ player.phone_number || 'No phone' }}</span></span>
-  </span>
-  <span class="online-card-empty" *ngIf="onlinePlayersSummary && !onlinePlayersSummary.onlineUsers">No players online</span>
-  <span class="stat-card-footer"><span><span class="small-live-dot"></span>{{ onlinePlayersSummary ? ((isConnected$ | async) ? 'Live unique players' : 'Last known presence') : 'Checking presence...' }}</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3h7v7m0-7L10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></svg></span>
-</button>
+<section class="stats-bar top-operational-strip" *ngIf="activeTab === 'monitor'" aria-label="Live treasury and claimed deposits">
 <article class="stat-card payhero-card"
   [class.balance-safe]="payHeroBalance !== null && payHeroBalance >= 200"
   [class.balance-warning]="payHeroBalance !== null && payHeroBalance >= 100 && payHeroBalance < 200"
@@ -70,6 +118,134 @@
   <p class="payhero-account" *ngIf="payHeroAccountId !== null">PayHero account {{ payHeroAccountId }}</p>
   <p class="payhero-error" *ngIf="payHeroError">{{ payHeroError }}</p>
 </article>
+
+<!-- RSVG ADMIN DAILY CLAIMS LEADERBOARD (COMPACT 2x2 GLASSMORPHISM CARD BESIDE PAYHERO) -->
+<article class="stat-card admin-leaderboard-box" aria-label="RSVG Daily Claims Leaderboard">
+  <header class="leaderboard-box-header">
+    <div class="box-trophy-badge" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>
+        <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+        <path d="M4 22h16"/>
+        <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+        <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+        <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+      </svg>
+    </div>
+
+    <div class="box-text-headings">
+      <div class="box-title-line">
+        <h3 class="box-main-title">RSVG Daily Claims</h3>
+        <div class="box-header-right">
+          <button
+            *ngIf="isSuperAdmin"
+            type="button"
+            class="micro-reset-btn leaderboard-manage-btn"
+            (click)="showClaimAdminsManager = !showClaimAdminsManager"
+            [attr.aria-expanded]="showClaimAdminsManager"
+            title="Add or remove claiming admin initials">
+            {{ showClaimAdminsManager ? 'Done' : '+/- Admins' }}
+          </button>
+          <span class="box-live-pill"><span class="pulse-pip"></span> LIVE</span>
+          <button
+            type="button"
+            class="micro-refresh-btn leaderboard-refresh-btn"
+            (click)="fetchAdminLeaderboard()"
+            [disabled]="leaderboardLoading"
+            title="Refresh daily claims leaderboard"
+            aria-label="Refresh daily claims leaderboard">
+            <svg class="refresh-icon" [class.spinning]="leaderboardLoading || leaderboardIsLiveSpinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <p class="box-sub-title">
+        <svg class="sub-clock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="9"/>
+          <polyline points="12 7 12 12 15.5 14"/>
+        </svg>
+        <span>24h &bull; Refreshes at 12:00 AM (EAT)</span>
+      </p>
+    </div>
+  </header>
+
+  <div *ngIf="isSuperAdmin && showClaimAdminsManager" class="leaderboard-admins-drawer">
+    <ng-container *ngTemplateOutlet="claimAdminsManager"></ng-container>
+  </div>
+
+  <!-- 2x2 COMPACT ADMIN RANKING CARDS -->
+  <div class="box-admins-row">
+    <div
+      *ngFor="let admin of sortedDailyAdmins; let idx = index; trackBy: trackByAdminTag"
+      class="admin-slot-item"
+      [ngClass]="'slot-admin-' + admin.tag.toLowerCase()"
+      [class.is-first]="idx === 0 && admin.totalVolume > 0"
+    >
+      <div class="slot-head">
+        <div class="slot-identity">
+          <span class="slot-tag-badge" [ngClass]="'badge-' + admin.tag.toLowerCase()">
+            {{ admin.tag }}
+          </span>
+          <strong class="slot-admin-name">Admin</strong>
+        </div>
+        <div class="slot-rank-chip" [ngClass]="'rank-' + (idx + 1)">
+          <svg class="medal-svg" viewBox="0 0 20 20" aria-hidden="true">
+            <path class="medal-ribbon" d="M6.2 1.5h3.2l1.1 4.2H7.4L6.2 1.5zm4.4 0h3.2l-1.2 4.2H9.5l1.1-4.2z"/>
+            <circle class="medal-disc" cx="10" cy="12.2" r="5.6"/>
+            <text x="10" y="14.4" text-anchor="middle" class="medal-num">{{ idx === 0 ? '1' : (idx === 1 ? '2' : '3') }}</text>
+          </svg>
+          <span class="rank-num-text">#{{ idx + 1 }}</span>
+        </div>
+      </div>
+
+      <div class="slot-primary-val mono">
+        <span class="val-curr">KES</span><span class="val-num">{{ admin.totalVolume | number:'1.0-0' }}</span>
+      </div>
+
+      <div class="slot-meta-row">
+        <span class="slot-claims-count">
+          <span class="slot-pulse-dot" [ngClass]="'dot-' + admin.tag.toLowerCase()" [class.has-claims]="admin.claimedCount > 0"></span>
+          <span>{{ admin.claimedCount }} {{ admin.claimedCount === 1 ? 'claim' : 'claims' }} today</span>
+        </span>
+        <span class="slot-share-pct mono">{{ admin.volumeSharePercent | number:'1.0-0' }}%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEATLY ALIGNED FOOTER -->
+  <footer class="box-footer-row">
+    <div class="box-totals-note">
+      <svg class="footer-bars-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <rect x="2" y="9" width="3.6" height="9" rx="1.5"/>
+        <rect x="8.2" y="3" width="3.6" height="15" rx="1.5"/>
+        <rect x="14.4" y="6.5" width="3.6" height="11.5" rx="1.5"/>
+      </svg>
+      <span>Today's Total: <strong class="mono">KES {{ (leaderboardData?.totalDayVolume || 0) | number:'1.0-0' }}</strong></span>
+    </div>
+    <span class="box-footer-divider" aria-hidden="true"></span>
+    <div class="box-sync-note">
+      <svg class="footer-clock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="12" cy="12" r="9"/>
+        <polyline points="12 7 12 12 15.5 14"/>
+      </svg>
+      <span>Starts 7 Nov 2026</span>
+    </div>
+  </footer>
+</article>
+</section>
+
+<!-- PLATFORM GENERAL METRICS ROW -->
+<section class="stats-bar platform-metrics-bar" *ngIf="activeTab === 'monitor'" aria-label="Platform overview"><button type="button" (click)="openOnlinePlayers()" title="View connected players across all rooms" class="stat-card blue clickable-stat-card online-player-card">
+  <span class="stat-card-top"><span class="stat-label">Online players</span><span class="stat-icon-wrapper"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6"/></svg></span></span>
+  <strong class="stat-val">{{ onlinePlayersSummary ? (onlinePlayersSummary.onlineUsers | number) : '--' }}</strong>
+  <span class="online-card-caption" *ngIf="onlinePlayersSummary?.topPlayers?.length">Top online by balance</span>
+  <span class="online-card-list" role="list" aria-label="Top online players">
+    <span class="online-card-player" role="listitem" *ngFor="let player of onlinePlayersSummary?.topPlayers; trackBy: trackById"><span class="online-card-name">{{ player.username }}</span><span class="online-card-phone">{{ player.phone_number || 'No phone' }}</span></span>
+  </span>
+  <span class="online-card-empty" *ngIf="onlinePlayersSummary && !onlinePlayersSummary.onlineUsers">No players online</span>
+  <span class="stat-card-footer"><span><span class="small-live-dot"></span>{{ onlinePlayersSummary ? ((isConnected$ | async) ? 'Live unique players' : 'Last known presence') : 'Checking presence...' }}</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3h7v7m0-7L10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></svg></span>
+</button>
 <article class="stat-card green"><div class="stat-card-top"><span class="stat-label">Total deposits</span><span class="stat-icon-wrapper"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg></span></div><strong class="stat-val"><span class="stat-currency">KES</span>{{ stats.totalDeposits | number:'1.2-2' }}</strong><div class="stat-card-footer"><span>M-Pesa deposits</span><button type="button" class="micro-reset-btn" (click)="openResetDepositsModal()" title="Reset deposits ledger">Reset ledger</button></div></article>
 <article class="stat-card gold"><div class="stat-card-top"><span class="stat-label">Total withdrawals</span><span class="stat-icon-wrapper"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5"/></svg></span></div><strong class="stat-val"><span class="stat-currency">KES</span>{{ stats.totalWithdrawals | number:'1.2-2' }}</strong><div class="stat-card-footer"><span>Player withdrawals</span><span class="stat-footnote">KES</span></div></article>
 <article class="stat-card purple"><div class="stat-card-top"><span class="stat-label">Total volume</span><span class="stat-icon-wrapper"><svg class="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 17 6-6 4 4 8-10m-6 0h6v6"/></svg></span></div><strong class="stat-val"><span class="stat-currency">KES</span>{{ stats.totalVolume | number:'1.2-2' }}</strong><div class="stat-card-footer"><span>{{ stats.totalBets | number }} total bets</span><span class="stat-footnote">All time</span></div></article></section>
@@ -640,6 +816,27 @@
             </div>
           </div>
 
+          <!-- TIMED CRASH TIMEOUT CONTROLS -->
+          <div class="staged-timeout-monitor-box" [class.is-blocking]="isTimedCrashTimeoutEnabled">
+            <div class="timeout-monitor-info">
+              <span class="timeout-indicator-light" [class.on]="isTimedCrashTimeoutEnabled"></span>
+              <div>
+                <strong class="timeout-monitor-title">Timed Crash Cashout Timeout</strong>
+                <span class="timeout-subtext">{{ isTimedCrashTimeoutEnabled ? 'ENABLED: All cashouts blocked with "staged timed out"' : 'DISABLED: Normal cashouts allowed' }}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="staged-timeout-action-btn"
+              [class.btn-danger]="isTimedCrashTimeoutEnabled"
+              [class.btn-safe]="!isTimedCrashTimeoutEnabled"
+              (click)="toggleTimedCrashTimeout()"
+              [disabled]="isTogglingTimedCrashTimeout"
+            >
+              {{ isTogglingTimedCrashTimeout ? 'Updating...' : (isTimedCrashTimeoutEnabled ? 'Turn OFF Timeout' : 'Turn ON Staged Timeout') }}
+            </button>
+          </div>
+
           <dl class="detail-grid">
             <div>
               <dt>Round ID</dt>
@@ -771,6 +968,7 @@
         </article>
       </section>
     </ng-container>
+
   </ng-container>
 
   <!-- TAB: ADMIN M-PESA STK PROMPT CONSOLE -->
@@ -1022,6 +1220,23 @@
 
           <p class="prompt-status-msg">{{ adminPromptMessage }}</p>
 
+          <div *ngIf="(adminPromptStatus === 'failed' || adminPromptStatus === 'waiting') && adminPromptDiagnostic"
+               class="deposit-diagnostic"
+               [class.deposit-diagnostic-pending]="adminPromptStatus === 'waiting'"
+               [attr.data-category]="adminPromptDiagnostic.category || 'unknown'">
+            <div class="deposit-diagnostic-head">
+              <span class="deposit-diagnostic-dot" aria-hidden="true"></span>
+              <strong>{{ getDepositDiagnosticTitle(adminPromptDiagnostic) }}</strong>
+              <small *ngIf="adminPromptDiagnostic.provider || adminPromptDiagnostic.code" class="deposit-diagnostic-meta">
+                <span *ngIf="adminPromptDiagnostic.provider" class="deposit-diagnostic-provider">
+                  {{ adminPromptDiagnostic.provider === 'payhero' ? 'PayHero' : adminPromptDiagnostic.provider === 'nexuspay' ? 'Nexus Pay' : '' }}
+                </span>
+                <span *ngIf="adminPromptDiagnostic.code as code" class="deposit-diagnostic-code mono">Code {{ code }}</span>
+              </small>
+            </div>
+            <span *ngIf="adminPromptDiagnostic.detail as detail" class="deposit-diagnostic-detail">{{ detail }}</span>
+          </div>
+
           <div class="prompt-status-meta mono text-xs">
             <span *ngIf="lastPromptedUsername">Account: <strong>{{ lastPromptedUsername }}</strong></span>
             <span *ngIf="lastPromptedPhone">Phone: <strong>{{ lastPromptedPhone }}</strong></span>
@@ -1150,6 +1365,7 @@
                   <span>&bull;</span>
                   <span>{{ tx.created_at | date:'shortTime' }}</span>
                 </div>
+                <ng-container *ngTemplateOutlet="depositReason; context: { $implicit: tx }"></ng-container>
               </div>
               <button type="button" class="sm-btn success" (click)="openPromptFromTransaction(tx)" title="Load customer and amount into prompt form">
                 Prompt
@@ -1356,6 +1572,78 @@
         {{ isSavingWithdrawalWagerRequirement ? 'Saving Settings...' : 'Save Configuration' }}
       </button>
     </section>
+
+    <section class="panel withdrawal-rule-panel" [class.timeout-active-panel]="isTimedCrashTimeoutEnabled">
+      <div class="panel-title-row">
+        <div>
+          <h2>Timed Crash Intercept (Staged Timed Out)</h2>
+          <p class="panel-desc">Prevent players from surpassing wager requirements by blocking crash cashouts with the message <strong>"staged timed out"</strong>.</p>
+        </div>
+        <div class="timeout-switch-container">
+          <button
+            type="button"
+            class="staged-timeout-action-btn"
+            [class.btn-danger]="isTimedCrashTimeoutEnabled"
+            [class.btn-safe]="!isTimedCrashTimeoutEnabled"
+            (click)="toggleTimedCrashTimeout()"
+            [disabled]="isTogglingTimedCrashTimeout"
+          >
+            {{ isTogglingTimedCrashTimeout ? 'Updating...' : (isTimedCrashTimeoutEnabled ? 'Turn OFF Timeout' : 'Turn ON Staged Timeout') }}
+          </button>
+        </div>
+      </div>
+
+      <div class="staged-timeout-card-body">
+        <div class="timeout-status-banner" [class.is-danger]="isTimedCrashTimeoutEnabled">
+          <span class="timeout-indicator-light" [class.on]="isTimedCrashTimeoutEnabled"></span>
+          <div class="timeout-banner-text">
+            <strong>Current State: {{ isTimedCrashTimeoutEnabled ? 'ENABLED (Cashouts Blocked)' : 'DISABLED (Normal Play)' }}</strong>
+            <p>
+              When switched <strong>ON</strong>, any player attempting to cash out will be rejected with the exact error toast <code>"staged timed out"</code> and the bet will remain active and uncashed until crash. This prevents players from surpassing wager requirements for withdrawal.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel withdrawal-rule-panel">
+      <div class="panel-title-row">
+        <div>
+          <h2>M-PESA Transaction Code (First 3 Digits / Prefix)</h2>
+          <p class="panel-desc">Configure the first three digits/characters of the M-PESA receipt code generated for withdrawals on BetPesa.</p>
+        </div>
+      </div>
+
+      <div class="withdrawal-settings-grid">
+        <div class="form-group">
+          <label for="mpesaCodePrefixInput">First 3 Digits / Prefix (e.g. UI, TIK, LGT, 123)</label>
+          <input
+            id="mpesaCodePrefixInput"
+            type="text"
+            maxlength="3"
+            class="styled-input uppercase-input"
+            [(ngModel)]="mpesaCodePrefix"
+            (ngModelChange)="onMpesaPrefixChange($event)"
+            [disabled]="isSavingMpesaPrefix"
+            placeholder="UI"
+          />
+          <p class="template-help">Enter 1 to 3 alphanumeric characters/digits. Total transaction code length remains 10 characters.</p>
+        </div>
+
+        <div class="form-group">
+          <label>Code Live Preview</label>
+          <div class="mpesa-preview-box">
+            <span class="preview-prefix">{{ (mpesaCodePrefix || 'UI').toUpperCase() }}</span><span class="preview-rest">8LE4TJR</span>
+            <span class="preview-length-tag">10 chars</span>
+          </div>
+          <p class="template-help">Live preview of how the M-PESA receipt code will be formatted in confirmation SMS and logs.</p>
+        </div>
+      </div>
+
+      <button class="action-btn primary margin-top" (click)="saveMpesaCodePrefix()" [disabled]="isSavingMpesaPrefix">
+        {{ isSavingMpesaPrefix ? 'Saving Prefix...' : 'Save M-PESA Code Prefix' }}
+      </button>
+    </section>
     <section class="panel withdrawal-rule-panel">
       <div class="panel-title-row">
         <div>
@@ -1370,21 +1658,20 @@
           <input
             id="depositSettingsMinimum"
             type="number"
-            min="1"
-            max="1000000"
+            min="199"
+            max="10000"
             step="1"
             class="styled-input"
             [(ngModel)]="minimumDepositAmount"
             [disabled]="isSavingMinimumDeposit"
           />
-          <p class="template-help">Players are shown this amount in the deposit tab and any smaller request is rejected. Allowed range: 1 to 1,000,000 KES.</p>
+          <p class="template-help">Players are shown this amount in the deposit tab and any smaller request is rejected. Allowed range: 199 to 10,000 KES.</p>
         </div>
       </div>
 
       <button class="action-btn primary margin-top" (click)="saveMinimumDeposit()" [disabled]="isSavingMinimumDeposit">
         {{ isSavingMinimumDeposit ? 'Saving Minimum...' : 'Save Minimum Deposit' }}
       </button>
-
     </section>
   </ng-container>
 
@@ -1427,6 +1714,11 @@
         <button type="button" [class.active]="txTypeFilter === 'withdrawal'" (click)="setTransactionType('withdrawal')">Withdrawals</button>
       </div>
 
+      <ng-container *ngIf="isSuperAdmin && txTypeFilter === 'deposit'">
+        <ng-container *ngTemplateOutlet="claimAdminsManager"></ng-container>
+      </ng-container>
+
+      <p *ngIf="userLoadError" role="alert">{{ userLoadError }} <button type="button" class="action-btn outline-sm" (click)="fetchUsers()">Retry</button></p>
       <div class="table-responsive margin-top" tabindex="0" aria-label="Scrollable account data">
         <table class="admin-table">
           <thead>
@@ -1458,6 +1750,7 @@
                 <span class="status-badge" [class.completed]="tx.status === 'completed'" [class.failed]="tx.status === 'failed'" [class.pending]="tx.status === 'pending'">
                   {{ tx.status | uppercase }}
                 </span>
+                <ng-container *ngTemplateOutlet="depositReason; context: { $implicit: tx }"></ng-container>
               </td>
               <td data-label="Admin Tag" class="admin-tag-td">
                   <ng-container *ngIf="tx.admin_tag; else superOrUnclaimed">
@@ -1485,11 +1778,24 @@
               </td>
               <td class="mono text-xs" data-label="Timestamp">{{ tx.created_at | date:'medium' }}</td>
               <td data-label="Actions" class="action-cell">
-                <button type="button" class="sm-btn success prompt-row-btn" (click)="openPromptFromTransaction(tx)" title="Send M-Pesa STK Push prompt to this customer">Prompt</button>
+                <div class="btn-group-row">
+                  <button type="button" class="sm-btn success prompt-row-btn" (click)="openPromptFromTransaction(tx)" title="Send M-Pesa STK Push prompt to this customer">Prompt</button>
+                  <ng-container *ngIf="tx.type === 'withdrawal' && tx.status === 'pending'">
+                    <button class="sm-btn success" (click)="openWithdrawalModalFromTx(tx, 'complete')" title="Approve Withdrawal">Approve</button>
+                    <button class="sm-btn danger" (click)="openWithdrawalModalFromTx(tx, 'reject')" title="Decline Withdrawal">Decline</button>
+                  </ng-container>
+                  <button *ngIf="isSuperAdmin && tx.status === 'completed'" type="button" class="sm-btn danger"
+                          [disabled]="deletingTransactionId !== null" (click)="deleteCompletedTransaction(tx)">
+                    {{ deletingTransactionId === tx.id ? 'Deleting…' : 'Delete' }}
+                  </button>
+                </div>
               </td>
             </tr>
             <tr *ngIf="transactionsList.length === 0">
-              <td colspan="9" class="text-center padding-lg text-muted">No records found matching query.</td>
+              <td colspan="9" class="text-center padding-lg text-muted">
+                <span *ngIf="isLoadingTransactions">Loading transactions...</span>
+                <span *ngIf="!isLoadingTransactions">No records found matching query.</span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -1605,6 +1911,8 @@
         </div>
         <div class="heading-actions"><button type="button" class="action-btn outline" (click)="closePinDialogs(); pinSetupOpen = true">Private PIN setup</button><button class="action-btn primary" (click)="showCreateAdminModal = true">+ Create Admin Account</button></div>
       </div>
+
+      <ng-container *ngTemplateOutlet="claimAdminsManager"></ng-container>
 
       <div class="table-responsive margin-top" tabindex="0" aria-label="Scrollable account data">
         <table class="admin-table">
@@ -1992,6 +2300,12 @@
       <div class="support-desk-grid margin-top">
         <!-- Tickets list on the left (on mobile, hidden when a ticket is selected) -->
         <div class="support-tickets-column" [class.hidden-on-mobile]="selectedTicket">
+          <div *ngIf="isSuperAdmin && supportTickets.length" class="support-selection-bar">
+            <label class="support-mark"><input type="checkbox" [checked]="allSupportTicketsMarked" [disabled]="isDeletingSupport"
+              (change)="markAllSupportTickets()" /> Mark all shown</label>
+            <button type="button" class="sm-btn danger" [disabled]="!markedSupportTicketIds.size || isDeletingSupport"
+              (click)="deleteMarkedSupportConversations()">Delete marked ({{ markedSupportTicketIds.size }})</button>
+          </div>
           <div *ngIf="filteredSupportTickets.length === 0" class="panel text-muted support-empty-tickets">
             No support tickets or appeals found in this category.
           </div>
@@ -2000,6 +2314,10 @@
                [class.active-ticket]="selectedTicket?.id === t.id"
                (click)="selectTicket(t)">
             <div class="support-ticket-header">
+              <label *ngIf="isSuperAdmin" class="support-mark" (click)="$event.stopPropagation()">
+                <input type="checkbox" [checked]="markedSupportTicketIds.has(t.id)" [disabled]="isDeletingSupport"
+                  [attr.aria-label]="'Mark conversation ' + t.id" (change)="markSupportTicket(t.id)" /> Mark
+              </label>
               <span class="role-badge" [class.admin]="t.category === 'appeal'">{{ t.category | uppercase }}</span>
               <span class="status-badge" [class.completed]="t.status === 'answered'" [class.pending]="t.status === 'open'">{{ t.status | uppercase }}</span>
             </div>
@@ -2025,12 +2343,22 @@
             <span class="status-badge" [class.completed]="selectedTicket.status === 'answered'" [class.pending]="selectedTicket.status === 'open'">{{ selectedTicket.status | uppercase }}</span>
           </div>
 
+          <div *ngIf="isSuperAdmin && selectedTicket.messages?.length" class="support-selection-bar">
+            <label class="support-mark"><input type="checkbox" [checked]="allSupportMessagesMarked" [disabled]="isDeletingSupport"
+              (change)="markAllSupportMessages()" /> Mark all messages</label>
+            <button type="button" class="sm-btn danger" [disabled]="!markedSupportMessageIds.size || isDeletingSupport"
+              (click)="deleteMarkedSupportMessages()">Delete marked ({{ markedSupportMessageIds.size }})</button>
+          </div>
           <div class="support-chat-messages">
             <div *ngFor="let m of selectedTicket.messages" 
                  class="support-msg-wrapper"
                  [class.from-admin]="m.sender === 'admin'"
                  [class.from-player]="m.sender !== 'admin'">
               <div class="support-msg-bubble" [class.admin-bubble]="m.sender === 'admin'" [class.player-bubble]="m.sender !== 'admin'">
+                <label *ngIf="isSuperAdmin && m._id" class="support-mark support-message-mark">
+                  <input type="checkbox" [checked]="markedSupportMessageIds.has(m._id)" [disabled]="isDeletingSupport"
+                    aria-label="Mark message" (change)="markSupportMessage(m._id)" /> Mark
+                </label>
                 <div class="support-msg-meta">
                   <span>{{ m.sender === 'admin' ? 'Support Desk' : ('Player: ' + selectedTicket.phone_number) }}</span>
                   <span class="mono">{{ m.created_at | date:'shortTime' }}</span>
@@ -2203,7 +2531,7 @@
       <div class="form-group margin-top"><label for="admin-pin-input">Your PIN (4 digits)</label><input id="admin-pin-input" name="adminPin" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" class="styled-input" [(ngModel)]="pinInput" required autocomplete="off" [disabled]="pinBusy" /></div>
     </ng-container>
     <ng-container *ngIf="pinSetupOpen">
-      <p class="panel-desc margin-top">Enter your private owner key to set or change the three PINs. Leave a PIN blank to keep it. Saved PINs cannot be displayed.</p>
+      <p class="panel-desc margin-top">Enter your private owner key to set or change the four PINs. Leave a PIN blank to keep it. Saved PINs cannot be displayed.</p>
       <div class="form-group margin-top"><label for="pin-owner-key">Private owner key</label><input id="pin-owner-key" name="ownerKey" type="password" class="styled-input" [(ngModel)]="ownerKeyInput" minlength="4" maxlength="72" required autocomplete="off" [disabled]="pinBusy" /></div>
       <div class="form-group margin-top" *ngFor="let tag of allowedAdminTags"><label [for]="'setup-pin-' + tag">New PIN for {{ tag }} (4 digits)</label><input [id]="'setup-pin-' + tag" [name]="'setupPin' + tag" type="password" inputmode="numeric" pattern="[0-9]{4}" minlength="4" maxlength="4" class="styled-input" [(ngModel)]="setupPins[tag]" autocomplete="new-password" [disabled]="pinBusy" /></div>
     </ng-container>

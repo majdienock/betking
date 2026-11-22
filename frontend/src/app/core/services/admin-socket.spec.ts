@@ -19,7 +19,7 @@ describe('Admin socket live delivery', () => {
         handlers.set(event, handler);
         return socket;
       }),
-      disconnect: vi.fn(), emit: vi.fn()
+      disconnect: vi.fn(), emit: vi.fn(), removeAllListeners: vi.fn()
     };
     vi.mocked(io).mockReturnValue(socket as Socket);
     TestBed.configureTestingModule({});
@@ -49,6 +49,21 @@ describe('Admin socket live delivery', () => {
     service.connect('new-token');
     expect(service.walletUpdated$.value).toBeNull();
     expect(service.userUpdated$.value).toBeNull();
+  });
+
+  it('delivers Support conversation deletions and clears them when replacing the connection', () => {
+    service.connect('token');
+    handlers.get('support_tickets_deleted')!({ ticketIds: [21, 22] });
+    expect(service.supportTicketsDeleted$.value).toEqual({ ticketIds: [21, 22] });
+    service.connect('new-token');
+    expect(service.supportTicketsDeleted$.value).toBeNull();
+  });
+
+  it('enables alternate transports and removes obsolete listeners before replacing a connection', () => {
+    service.connect('token');
+    expect(vi.mocked(io).mock.lastCall?.[1]).toMatchObject({ transports: ['polling', 'websocket'], tryAllTransports: true });
+    service.connect('next-token');
+    expect(socket.removeAllListeners).toHaveBeenCalled();
   });
 
   it('stops reconnecting when administrator access is revoked', () => {

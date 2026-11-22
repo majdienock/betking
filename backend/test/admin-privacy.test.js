@@ -7,7 +7,7 @@ const { migratePinSettings } = require('../admin-pin-database');
 
 const directory = [
   { id: 7, username: '0712345678', phone_number: '+254712345678', owner_tag: 'R', payer_phones: ['0799887766'] },
-  { id: 8, username: 'george', phone_number: '0711112222', owner_tag: 'D' }
+  { id: 8, username: 'george', phone_number: '0711112222', owner_tag: 'G' }
 ];
 
 test('locked admin payloads mask phone aliases, payout accounts, logs and support messages without changing player data', () => {
@@ -57,6 +57,31 @@ test('phone searches cannot confirm masked full numbers, and owners can search l
   assert.equal(maskPhone('0712345678'), '071*****78');
   const search = protectPayload({ players: payload.users, total: 1, page: 1, totalPages: 1 }, directory, null, '0712345678');
   assert.equal(search.total, 0);
+});
+
+test('Support reveals only ticket contact numbers and leaves all other masking unchanged', () => {
+  const ticket = { id: 100, phone_number: '0712 345 678', username: '0712345678', password_hash: 'secret',
+    messages: [{ sender_name: '0712345678', text: 'Call 0799887766' }] };
+  const payload = { tickets: [ticket], ticket, users: [{ id: 7, role: 'user', phone_number: '0712345678' }],
+    transactions: [{ user_id: 7, type: 'deposit', phone_number: '0712345678' }], logs: [{ details: 'Call 0712345678' }] };
+  const masked = protectPayload(payload, directory);
+  const support = protectPayload(payload, directory, null, '', true);
+  for (const contact of [support.tickets[0], support.ticket]) {
+    assert.equal(contact.phone_number, ticket.phone_number);
+    assert.equal(contact.phone_hidden, false);
+    assert.equal(contact.password_hash, undefined);
+    assert.equal(contact.username, masked.ticket.username);
+    assert.deepEqual(contact.messages, masked.ticket.messages);
+  }
+  for (const field of ['users', 'transactions', 'logs']) assert.deepEqual(support[field], masked[field]);
+  assert.equal(ticket.phone_number, '0712 345 678');
+});
+
+test('Support phone visibility preserves PIN ownership filtering and foreign-ticket masking', () => {
+  const ticket = { id: 100, phone_number: '0711112222' };
+  const payload = { tickets: [ticket], ticket };
+  assert.deepEqual(protectPayload(payload, directory, 'R', '', true), protectPayload(payload, directory, 'R'));
+  assert.equal(protectPayload(payload, directory, 'G', '', true).tickets[0].phone_number, ticket.phone_number);
 });
 
 test('database scopes exclude other owners before pagination, including support phone formats', () => {
@@ -184,8 +209,8 @@ function fixture(ownerKey = 'private-owner-key-only') {
 test('private setup requires the owner key, stores hashes, rejects duplicate PINs and invalidates existing access', async () => {
   const { service, profiles, sessions } = fixture();
   await assert.rejects(service.configure('wrong-owner-key', { R: '1357' }), { status: 403 });
-  await assert.rejects(service.configure('private-owner-key-only', { R: '1357', D: '1357' }), { status: 400 });
-  await service.configure('private-owner-key-only', { R: '1357', D: '2468', K: '3690' });
+  await assert.rejects(service.configure('private-owner-key-only', { R: '1357', G: '1357' }), { status: 400 });
+  await service.configure('private-owner-key-only', { R: '1357', G: '2468', S: '3690', V: '4826' });
   assert.notEqual(profiles.get('R'), '1357');
   assert.equal(await bcrypt.compare('1357', profiles.get('R')), true);
   const session = await service.unlock('R', '1357', 'shared-account');
@@ -218,12 +243,12 @@ test('a four-character owner key configures PINs and cannot be assigned as an ad
 test('same account can hold independent PIN identities; wrong PIN, different login token, expiry and lock never unlock', async () => {
   const { service, profiles, sessions } = fixture();
   profiles.set('R', bcrypt.hashSync('1357', 4));
-  profiles.set('D', bcrypt.hashSync('2468', 4));
+  profiles.set('G', bcrypt.hashSync('2468', 4));
   await assert.rejects(service.unlock('R', '2468', 'shared-account'), { status: 403 });
   const r = await service.unlock('R', '1357', 'shared-account');
-  const g = await service.unlock('D', '2468', 'shared-account');
+  const g = await service.unlock('G', '2468', 'shared-account');
   assert.equal((await service.identity(r.pinToken, 'shared-account')).tag, 'R');
-  assert.equal((await service.identity(g.pinToken, 'shared-account')).tag, 'D');
+  assert.equal((await service.identity(g.pinToken, 'shared-account')).tag, 'G');
   assert.equal(await service.identity(r.pinToken, 'another-account'), null);
   await service.lock(r.pinToken, 'shared-account');
   assert.equal(await service.identity(r.pinToken, 'shared-account'), null);
@@ -242,13 +267,13 @@ test('completed deposit claims establish one client owner and reject transfers e
   const { service, transactions, phoneOwners } = fixture();
   await service.claim(101, 'R', 1);
   assert.equal(phoneOwners.get('254712345678').owner_tag, 'R');
-  await assert.rejects(service.claim(102, 'D', 1), { status: 403 });
-  await assert.rejects(service.claim(101, 'D', 1), { status: 403 });
+  await assert.rejects(service.claim(102, 'G', 1), { status: 403 });
+  await assert.rejects(service.claim(101, 'G', 1), { status: 403 });
   assert.equal(transactions.get(102).admin_tag, 'R');
   await service.claim(102, 'R', 1);
   assert.equal(transactions.get(102).admin_tag, 'R');
-  await assert.rejects(service.claim(103, 'K', 1), { status: 400 });
-  await assert.rejects(service.claim(104, 'K', 1), { status: 400 });
+  await assert.rejects(service.claim(103, 'S', 1), { status: 400 });
+  await assert.rejects(service.claim(104, 'S', 1), { status: 400 });
   assert.equal(phoneOwners.has('254711112222'), false);
 });
 
@@ -264,8 +289,8 @@ test('claims avoid repeated historical scans and global user reads while ownersh
   await service.claim(101, 'R', 1);
   models.User.find = find;
   assert.equal((await service.directory()).find(client => client.id === 7).owner_tag, 'R');
-  phoneOwners.set('254711112222', { _id: '254711112222', owner_tag: 'D', user_id: 8, client_phone: '254711112222' });
-  assert.equal((await service.directory()).find(client => client.id === 8).owner_tag, 'D');
+  phoneOwners.set('254711112222', { _id: '254711112222', owner_tag: 'G', user_id: 8, client_phone: '254711112222' });
+  assert.equal((await service.directory()).find(client => client.id === 8).owner_tag, 'G');
 });
 
 test('ownership migration shares concurrent work and can retry after a database failure', async () => {
@@ -277,6 +302,19 @@ test('ownership migration shares concurrent work and can retry after a database 
   await Promise.all([service.directory(), service.directory(), service.directory()]);
   assert.equal(reads, 2);
   await service.directory();
+  assert.equal(reads, 2);
+});
+
+test('overlapping privacy reads share work without keeping a completed ownership snapshot', async () => {
+  const { service, models, phoneOwners } = fixture();
+  await service.directory();
+  const find = models.User.find;
+  let reads = 0;
+  models.User.find = filter => { reads++; return find(filter); };
+  await Promise.all([service.directory(), service.directory(), service.directory()]);
+  assert.equal(reads, 1);
+  phoneOwners.set('254711112222', { _id: '254711112222', owner_tag: 'G', user_id: 8, client_phone: '254711112222' });
+  assert.equal((await service.directory()).find(row => row.id === 8).owner_tag, 'G');
   assert.equal(reads, 2);
 });
 
@@ -337,13 +375,13 @@ test('admin/superadmin accounts and numbers never acquire client ownership', asy
   users.push({ id: 2, role: 'admin', username: 'staff', phone_number: '0799001122' });
   transactions.set(105, { id: 105, user_id: 2, type: 'deposit', status: 'completed', admin_tag: null });
   await assert.rejects(service.claim(101, 'R', 1), { status: 400 });
-  await assert.rejects(service.claim(105, 'D', 1), { status: 400 });
+  await assert.rejects(service.claim(105, 'G', 1), { status: 400 });
   assert.equal(phoneOwners.size, 0);
   // Exemption also applies to old claims created before the exclusion existed.
   phoneOwners.set('254712345678', { _id: '254712345678', user_id: 7, owner_tag: 'R', client_phone: '254712345678' });
   const clients = await service.directory();
   const payload = protectPayload({ transactions: [{ id: 101, user_id: 7, client_phone: '254712345678',
-    type: 'deposit', status: 'failed', admin_tag: 'R', phone_number: '0712345678' }] }, clients, 'D');
+    type: 'deposit', status: 'failed', admin_tag: 'R', phone_number: '0712345678' }] }, clients, 'G');
   assert.equal(payload.transactions[0].phone_number, '0712345678');
   assert.equal(payload.transactions[0].admin_tag, null);
   assert.equal(payload.transactions[0].ownership_exempt, true);
@@ -355,24 +393,24 @@ test('database PIN settings override legacy environment hashes and migrate witho
   const { service, models, settings, profiles } = fixture('3842');
   await migratePinSettings(models, { ADMIN_PIN_SETUP_KEY_HASH: bcrypt.hashSync('9999', 4), ADMIN_PIN_R_HASH: bcrypt.hashSync('0123', 4) });
   assert.equal(await bcrypt.compare('3842', settings.get('owner').owner_key_hash), true);
-  await service.configure('3842', { D: '2468' });
+  await service.configure('3842', { G: '2468' });
   await service.unlock('R', '0123', 'shared-account');
   await migratePinSettings(models, { ADMIN_PIN_R_HASH: bcrypt.hashSync('9999', 4) });
   assert.equal(await bcrypt.compare('0123', profiles.get('R')), true);
   settings.clear();
-  await assert.rejects(service.configure('3842', { D: '2468' }), { status: 503 });
+  await assert.rejects(service.configure('3842', { G: '2468' }), { status: 503 });
 });
 
 test('concurrent deposits for the same client cannot create two owners', async () => {
   const { service, phoneOwners } = fixture();
-  const results = await Promise.allSettled([service.claim(101, 'R', 1), service.claim(102, 'D', 1)]);
+  const results = await Promise.allSettled([service.claim(101, 'R', 1), service.claim(102, 'G', 1)]);
   assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
   assert.equal(phoneOwners.get('254712345678').owner_tag, 'R');
 });
 
 test('legacy completed deposit claims apply in support and cannot be stolen through a new deposit', async () => {
   const { service, transactions } = fixture();
-  transactions.get(101).admin_tag = 'D';
+  transactions.get(101).admin_tag = 'G';
   const users = await service.directory();
   const payload = { tickets: [{ id: 999, phone_number: '0712345678' }] };
   assert.equal(protectPayload(payload, users, 'R').tickets.length, 0);
@@ -406,13 +444,60 @@ test('all HTTP admin response data fails closed if ownership lookup fails', asyn
   assert.ok(!JSON.stringify(payload).includes('0712345678'));
 });
 
+test('only Support ticket list, reply and message-deletion routes reveal the ticket contact number', async () => {
+  const { service } = fixture();
+  await service.claim(101, 'R', 1);
+  for (const [method, originalUrl, visible] of [
+    ['GET', '/api/admin/support/tickets?search=anything', true],
+    ['POST', '/api/admin/support/reply', true],
+    ['DELETE', '/api/admin/support/tickets/100/messages', true],
+    ['GET', '/api/admin/users?showSupportContactNumbers=true', false],
+    ['GET', '/api/admin/logs', false],
+    ['GET', '/api/admin/support/tickets/other', false],
+    ['POST', '/api/admin/support/tickets', false]
+  ]) {
+    const req = { method, originalUrl, headers: { authorization: 'Bearer admin-account' }, query: {} };
+    const res = { set() {}, status() { return this; } };
+    const finished = new Promise(resolve => { res.json = resolve; });
+    service.middleware(req, res, () => res.json({ ticket: { id: 100, phone_number: '0712345678' },
+      users: [{ id: 7, role: 'user', phone_number: '0712345678' }] }));
+    const result = await finished;
+    assert.equal(result.ticket.phone_number, visible ? '0712345678' : '071*****78', originalUrl);
+    assert.equal(result.users[0].phone_number, '071*****78', originalUrl);
+  }
+});
+
+test('only live Support updates reveal contact numbers; ordinary socket events stay masked', async () => {
+  const { service, profiles } = fixture();
+  await service.claim(101, 'R', 1);
+  profiles.set('G', bcrypt.hashSync('2468', 4));
+  const foreign = await service.unlock('G', '2468', 'shared');
+  for (const [event, pinToken, expected] of [
+    ['support_ticket_update', null, '0712345678'],
+    ['support_ticket_update', foreign.pinToken, '071*****78'],
+    ['activity_updated', null, '071*****78']
+  ]) {
+    let finish;
+    const done = new Promise(resolve => { finish = resolve; });
+    const socket = { connected: true, handshake: { auth: { token: 'shared', pinToken } },
+      emit: (name, payload) => finish({ name, payload }) };
+    service.protectSocket(socket);
+    socket.emit(event, { ticket: { id: 100, phone_number: '0712345678' },
+      users: [{ id: 7, role: 'user', phone_number: '0712345678' }] });
+    const result = await done;
+    assert.equal(result.name, event);
+    assert.equal(result.payload.ticket.phone_number, expected);
+    if (!pinToken) assert.equal(result.payload.users[0].phone_number, '071*****78');
+  }
+});
+
 test('socket broadcasts verify each PIN independently and initial snapshots cannot expose claimed phones', async () => {
   const { service, profiles } = fixture();
   profiles.set('R', bcrypt.hashSync('1357', 4));
-  profiles.set('D', bcrypt.hashSync('2468', 4));
+  profiles.set('G', bcrypt.hashSync('2468', 4));
   await service.claim(101, 'R', 1);
   const r = await service.unlock('R', '1357', 'shared');
-  const g = await service.unlock('D', '2468', 'shared');
+  const g = await service.unlock('G', '2468', 'shared');
   function socket(pinToken) {
     const events = [];
     let resolve;
@@ -429,4 +514,28 @@ test('socket broadcasts verify each PIN independently and initial snapshots cann
   assert.equal(first.events[0].payload.topPlayers[0].phone_number, '+254712345678');
   assert.equal(second.events[0].payload.topPlayers.length, 0);
   assert.equal(locked.events[0].payload.topPlayers[0].phone_number, '+25471*****78');
+});
+
+test('can add and remove claiming admin initials dynamically and claim transactions with a newly added initial', async () => {
+  const { service, transactions, phoneOwners } = fixture();
+  await assert.rejects(service.claim(101, 'M', 1), { status: 400 });
+
+  const added = await service.addAdminTag('m');
+  assert.equal(added.tag, 'M');
+  assert.ok(added.tags.includes('M'));
+  assert.deepEqual(await service.getAdminTags(), added.tags);
+  await assert.rejects(service.addAdminTag('M'), { status: 409 });
+
+  await service.claim(101, 'M', 1);
+  assert.equal(transactions.get(101).admin_tag, 'M');
+  assert.equal(phoneOwners.get('254712345678').owner_tag, 'M');
+
+  await service.configure('private-owner-key-only', { M: '9753' });
+  const unlocked = await service.unlock('M', '9753', 'shared');
+  assert.equal((await service.identity(unlocked.pinToken, 'shared')).tag, 'M');
+
+  const removed = await service.removeAdminTag('M');
+  assert.equal(removed.tag, 'M');
+  assert.ok(!removed.tags.includes('M'));
+  assert.equal(await service.identity(unlocked.pinToken, 'shared'), null);
 });

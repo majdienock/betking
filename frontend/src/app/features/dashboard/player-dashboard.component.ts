@@ -5,6 +5,8 @@ import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService, User } from '../../core/services/auth.service';
+import { withdrawalErrorPopup } from '../../core/services/withdrawal-feedback';
+import { GameSocketService } from '../../core/services/game-socket.service';
 import { SanitizedModeService } from '../../core/services/sanitized-mode.service';
 import { FootballMatch, MatchOutcome, SportsMarketService } from '../../core/services/sports-market.service';
 import { getBackendOrigin } from '../../core/config/backend-url';
@@ -27,6 +29,7 @@ interface BetSlipSelection {
 })
 export class PlayerDashboardComponent implements OnInit, OnDestroy {
   private readonly authService = inject(AuthService);
+  private readonly gameSocket = inject(GameSocketService);
   private readonly router = inject(Router);
   private readonly sanitizedModeService = inject(SanitizedModeService);
   private readonly http = inject(HttpClient);
@@ -51,10 +54,10 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
   readonly betNotice = signal<string | null>(null);
   readonly depositNotice = signal<string | null>(null);
   readonly isDepositing = signal(false);
-  readonly minimumDeposit = signal(999);
+  readonly minimumDeposit = signal(199);
 
   stake = 20;
-  depositAmount = 999;
+  depositAmount = 199;
   depositPhone = '';
   betslipCode = '';
 
@@ -582,22 +585,19 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
             type: 'completed'
           });
         } else {
-          const notification = typeof res.notification === 'string'
-            ? { title: 'Withdrawal Notice', message: res.notification, type: (res.status === 'completed' ? 'completed' : 'pending') }
-            : { title: res.notification.title, message: res.notification.message, type: res.notification.type };
+          const popupData = res.popup || (typeof res.notification === 'object' && res.notification !== null ? res.notification : null);
+          const notification = {
+            title: popupData?.title || 'Withdrawal Notice',
+            message: popupData?.message || (typeof res.notification === 'string' ? res.notification : res.message) || 'Withdrawal submitted and awaiting admin review.',
+            type: popupData?.type || (res.status === 'completed' ? 'completed' : 'pending')
+          };
           this.withdrawalPopup.set(notification);
         }
       },
-      error: (message: string) => {
+      error: (error: unknown) => {
         this.isWithdrawing.set(false);
-        const text = message || 'Withdrawal could not be completed.';
-        const insufficient = /insufficient|balance/i.test(text);
         this.showWithdrawModal.set(false);
-        this.withdrawalPopup.set({
-          title: insufficient ? 'Insufficient Funds' : 'Withdrawal Notice',
-          message: text,
-          type: 'rejected'
-        });
+        this.withdrawalPopup.set(withdrawalErrorPopup(error));
       }
     });
   }
@@ -724,6 +724,15 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
         this.minimumDeposit.set(minimum);
         if (!Number.isFinite(this.depositAmount) || this.depositAmount < minimum) {
           this.depositAmount = minimum;
+        }
+      }),
+      this.gameSocket.withdrawalNotification$.subscribe(payload => {
+        if (payload) {
+          this.withdrawalPopup.set({
+            title: payload.title || 'Withdrawal Notice',
+            message: payload.message,
+            type: payload.type || 'pending'
+          });
         }
       })
     );

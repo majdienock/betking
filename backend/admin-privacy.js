@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { normalizePhone, isStaff, phoneFor, staffPhones } = require('./admin-phone-ownership');
 
-const ADMIN_TAGS = ['R', 'D', 'K'];
+const ADMIN_TAGS = ['R', 'G', 'S', 'V'];
 const PIN_SESSION_MS = 15 * 60 * 1000;
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 const digest = value => crypto.createHash('sha256').update(String(value || '')).digest('hex');
@@ -37,7 +37,7 @@ function adminTicketScope(req) {
 }
 
 // Work on a copy: player responses and in-memory presence retain their original data.
-function protectPayload(payload, directory, tag = null, search = '') {
+function protectPayload(payload, directory, tag = null, search = '', showSupportContactNumbers = false) {
   const byId = new Map(directory.map(user => [Number(user.id), user]));
   const byName = new Map(directory.filter(user => user.username).map(user => [user.username, user]));
   const byPhone = new Map();
@@ -115,6 +115,14 @@ function protectPayload(payload, directory, tag = null, search = '') {
       if (ownerTag) result.client_admin_tag = ownerTag;
       result.phone_hidden = hidden;
     }
+    // Support exposes only the ticket contact field. Message text, usernames,
+    // other payload fields and access to another PIN's tickets stay protected.
+    if (showSupportContactNumbers && ['ticket', 'tickets'].includes(field)
+      && (!tag || !ownerTag || owner?.exempt || ownerTag === tag)
+      && typeof value.phone_number === 'string') {
+      result.phone_number = value.phone_number;
+      if ('phone_hidden' in result) result.phone_hidden = false;
+    }
     if (value.user_id !== undefined && value.type) {
       result.ownership_exempt = Boolean(owner?.exempt);
       result.admin_tag = ownerTag || null;
@@ -141,6 +149,109 @@ function createAdminPrivacy(models) {
   const { User, Transaction, Deposit, AdminClientOwner, AdminPhoneOwner, AdminPinSettings, AdminPinSession, AdminPinAttempt, AdminPinProfile } = models;
   const configuredHash = async tag => (await AdminPinProfile.findById(tag).lean())?.pin_hash || '';
   let migrationPromise;
+  let directoryRead = null;
+
+  const identityCache = new Map();
+  const IDENTITY_CACHE_TTL_MS = 15000;
+  let cachedAdminTags = null;
+
+  function invalidateCaches() {
+    identityCache.clear();
+    directoryRead = null;
+  }
+
+  function sanitizeAdminTags(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const raw of list) {
+      const tag = String(raw || '').trim().toUpperCase();
+      if (/^[A-Z0-9]{1,3}$/.test(tag) && !seen.has(tag)) {
+        seen.add(tag);
+        out.push(tag);
+      }
+    }
+    return out;
+  }
+
+  async function getAdminTags() {
+    if (Array.isArray(cachedAdminTags) && cachedAdminTags.length > 0) {
+      return [...cachedAdminTags];
+    }
+    try {
+      const doc = AdminPinSettings?.findById ? await AdminPinSettings.findById('owner').lean() : null;
+      const stored = sanitizeAdminTags(doc?.admin_tags);
+      if (stored.length > 0) {
+        cachedAdminTags = stored;
+        return [...cachedAdminTags];
+      }
+    } catch (_e) {
+      // Fallback to default ADMIN_TAGS
+    }
+    cachedAdminTags = [...ADMIN_TAGS];
+    return [...cachedAdminTags];
+  }
+
+  async function persistAdminTags(nextTags) {
+    const now = new Date();
+    if (typeof AdminPinSettings?.findOneAndUpdate === 'function') {
+      await AdminPinSettings.findOneAndUpdate(
+        { _id: 'owner' },
+        { $set: { admin_tags: nextTags, updated_at: now } },
+        { upsert: true, new: true }
+      );
+    } else if (typeof AdminPinSettings?.updateOne === 'function') {
+      const existing = AdminPinSettings.findById ? await AdminPinSettings.findById('owner').lean() : null;
+      if (existing && typeof existing === 'object') {
+        existing.admin_tags = nextTags;
+        existing.updated_at = now;
+      }
+      await AdminPinSettings.updateOne(
+        { _id: 'owner' },
+        { $set: { admin_tags: nextTags, updated_at: now }, $setOnInsert: { _id: 'owner', admin_tags: nextTags } },
+        { upsert: true }
+      );
+    }
+    cachedAdminTags = [...nextTags];
+    invalidateCaches();
+  }
+
+  async function addAdminTag(rawTag) {
+    const tag = String(rawTag || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{1,3}$/.test(tag)) {
+      throw fail(400, 'Admin initial must be 1 to 3 letters or numbers (e.g. R, K, M).');
+    }
+    const current = await getAdminTags();
+    if (current.includes(tag)) {
+      throw fail(409, `Admin initial ${tag} already exists.`);
+    }
+    if (current.length >= 16) {
+      throw fail(400, 'Maximum of 16 admin initials allowed.');
+    }
+    const nextTags = [...current, tag];
+    await persistAdminTags(nextTags);
+    return { tag, tags: [...nextTags], message: `Admin initial ${tag} added.` };
+  }
+
+  async function removeAdminTag(rawTag) {
+    const tag = String(rawTag || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{1,3}$/.test(tag)) {
+      throw fail(400, 'Invalid admin initial.');
+    }
+    const current = await getAdminTags();
+    if (!current.includes(tag)) {
+      throw fail(404, `Admin initial ${tag} was not found.`);
+    }
+    if (current.length <= 1) {
+      throw fail(400, 'At least one admin initial must remain active.');
+    }
+    const nextTags = current.filter(item => item !== tag);
+    await persistAdminTags(nextTags);
+    if (typeof AdminPinSession?.deleteMany === 'function') {
+      await AdminPinSession.deleteMany({ tag: { $in: [tag] } });
+    }
+    return { tag, tags: [...nextTags], message: `Admin initial ${tag} removed.` };
+  }
 
   function ensureOwnershipMigration() {
     if (!migrationPromise) migrationPromise = migrateLegacyOwnership().catch(error => {
@@ -188,7 +299,19 @@ function createAdminPrivacy(models) {
     }
   }
 
-  async function directory() {
+  function directory() {
+    // Share concurrent broadcasts/requests, without caching completed ownership
+    // reads. The next request still sees new claims, exemptions and deletions.
+    if (!directoryRead) {
+      const pending = readDirectory().finally(() => {
+        if (directoryRead === pending) directoryRead = null;
+      });
+      directoryRead = pending;
+    }
+    return directoryRead;
+  }
+
+  async function readDirectory() {
     await ensureOwnershipMigration();
     // Only the legacy import is memoized. Live ownership and exemptions are always fresh.
     const [users, existing] = await Promise.all([
@@ -223,15 +346,30 @@ function createAdminPrivacy(models) {
 
   async function identity(pinToken, accountToken) {
     if (!pinToken || !accountToken || !/^[a-f0-9]{64}$/.test(String(pinToken))) return null;
+    const cacheKey = `${pinToken}:${accountToken}`;
+    const cached = identityCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now < cached.expiresAt) {
+      return cached.session;
+    }
     const session = await AdminPinSession.findOne({
       token_hash: digest(pinToken), account_hash: digest(accountToken), expires_at: { $gt: new Date() }
     }).lean();
-    if (!session || session.profile_hash !== digest(await configuredHash(session.tag))) return null;
+    if (!session || session.profile_hash !== digest(await configuredHash(session.tag))) {
+      identityCache.set(cacheKey, { session: null, expiresAt: now + 5000 });
+      return null;
+    }
+    const sessionExpiresAt = new Date(session.expires_at).getTime();
+    identityCache.set(cacheKey, { session, expiresAt: Math.min(now + IDENTITY_CACHE_TTL_MS, sessionExpiresAt) });
     return session;
   }
 
   async function unlock(tag, pin, accountToken) {
-    if (!ADMIN_TAGS.includes(tag) || !/^\d{4}$/.test(String(pin || ''))) throw fail(400, 'Choose R, D or K and enter your 4-digit PIN.');
+    const activeTags = await getAdminTags();
+    const tagListLabel = activeTags.length > 1
+      ? `${activeTags.slice(0, -1).join(', ')} or ${activeTags[activeTags.length - 1]}`
+      : activeTags[0];
+    if (!activeTags.includes(tag) || !/^\d{4}$/.test(String(pin || ''))) throw fail(400, `Choose ${tagListLabel} and enter your 4-digit PIN.`);
     const hash = await configuredHash(tag);
     if (!/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(hash)) throw fail(503, `PIN for ${tag} has not been configured. Contact the platform owner.`);
     const now = new Date();
@@ -250,10 +388,12 @@ function createAdminPrivacy(models) {
       token_hash: digest(pinToken), account_hash: digest(accountToken), tag,
       profile_hash: digest(hash), expires_at: expiresAt
     });
+    invalidateCaches();
     return { pinToken, tag, expiresAt: expiresAt.toISOString() };
   }
 
   async function lock(pinToken, accountToken) {
+    invalidateCaches();
     await AdminPinSession.deleteOne({ token_hash: digest(pinToken), account_hash: digest(accountToken) });
   }
 
@@ -270,16 +410,17 @@ function createAdminPrivacy(models) {
     ], { upsert: true, new: true });
     if (attempts.attempts > 5) throw fail(429, 'Too many owner-key attempts. Try again after 15 minutes.');
     if (!await bcrypt.compare(ownerKey, hash)) throw fail(403, 'Incorrect private owner key.');
-    const tags = ADMIN_TAGS.filter(tag => pins?.[tag]);
+    const activeTags = await getAdminTags();
+    const tags = activeTags.filter(tag => pins?.[tag]);
     if (!tags.length || tags.some(tag => typeof pins[tag] !== 'string' || !/^\d{4}$/.test(pins[tag]))) throw fail(400, 'Enter a 4-digit PIN for each admin you want to configure.');
-    const current = await Promise.all(ADMIN_TAGS.map(configuredHash));
+    const current = await Promise.all(activeTags.map(configuredHash));
     const nextHashes = new Map();
     for (const tag of tags) {
       if (pins[tag] === ownerKey) throw fail(400, 'An admin PIN must be different from the private owner key.');
-      for (const other of ADMIN_TAGS) {
+      for (const other of activeTags) {
         if (other === tag) continue;
         if (pins[other] && pins[other] === pins[tag]) throw fail(400, 'Each admin must have a different PIN.');
-        if (!pins[other] && current[ADMIN_TAGS.indexOf(other)] && await bcrypt.compare(pins[tag], current[ADMIN_TAGS.indexOf(other)])) throw fail(400, 'Each admin must have a different PIN.');
+        if (!pins[other] && current[activeTags.indexOf(other)] && await bcrypt.compare(pins[tag], current[activeTags.indexOf(other)])) throw fail(400, 'Each admin must have a different PIN.');
       }
       nextHashes.set(tag, await bcrypt.hash(pins[tag], 12));
     }
@@ -287,11 +428,13 @@ function createAdminPrivacy(models) {
       filter: { _id: tag }, update: { $set: { pin_hash: nextHashes.get(tag), updated_at: now } }, upsert: true
     } })));
     await AdminPinSession.deleteMany({ tag: { $in: tags } });
+    invalidateCaches();
     return { message: `PINs saved for ${tags.join(', ')}.`, configuredTags: tags };
   }
 
   async function claim(txId, tag, adminId) {
-    if (!ADMIN_TAGS.includes(tag)) throw fail(400, 'Invalid admin initial.');
+    const activeTags = await getAdminTags();
+    if (!activeTags.includes(tag)) throw fail(400, 'Invalid admin initial.');
     await ensureOwnershipMigration();
     await AdminPhoneOwner.init();
     const session = await Transaction.startSession();
@@ -328,6 +471,7 @@ function createAdminPrivacy(models) {
         }, { new: true, session });
         if (!result) throw fail(409, 'Transaction changed. Refresh and try again.');
       });
+      invalidateCaches();
       return result;
     } finally {
       await session.endSession();
@@ -339,7 +483,12 @@ function createAdminPrivacy(models) {
     res.set('Cache-Control', 'no-store');
     const accountToken = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     req.adminAccountToken = accountToken;
-    const controlRequest = req.method === 'POST' && /^\/api\/admin\/(?:pin\/(?:unlock|lock|configure)|transactions\/\d+\/claim-tag)$/.test((req.originalUrl || '').split('?')[0]) || (['GET', 'PUT'].includes(req.method) && (req.originalUrl || '').split('?')[0] === '/api/admin/payment-gateway');
+    const supportResponse = (req.method === 'GET' && (req.originalUrl || '').split('?')[0] === '/api/admin/support/tickets')
+      || (req.method === 'POST' && (req.originalUrl || '').split('?')[0] === '/api/admin/support/reply')
+      || (req.method === 'DELETE' && /^\/api\/admin\/support\/tickets\/\d+\/messages$/.test((req.originalUrl || '').split('?')[0]));
+    const controlRequest = (req.method === 'POST' && /^\/api\/admin\/(?:pin\/(?:unlock|lock|configure)|transactions\/\d+\/claim-tag)$/.test((req.originalUrl || '').split('?')[0]))
+      || (['GET', 'PUT'].includes(req.method) && (req.originalUrl || '').split('?')[0] === '/api/admin/payment-gateway')
+      || (['GET', 'POST', 'DELETE'].includes(req.method) && /^\/api\/admin\/claim-tags(?:\/[^/?]+)?$/.test((req.originalUrl || '').split('?')[0]));
     (controlRequest ? Promise.resolve(null) : identity(req.headers['x-admin-pin'], accountToken)).then(async pinIdentity => {
       req.pinIdentity = pinIdentity;
       if (!controlRequest && req.method !== 'GET') await ensureOwnershipMigration();
@@ -350,8 +499,12 @@ function createAdminPrivacy(models) {
         // Serialize immediately so concurrent mutations cannot alter an outbound snapshot.
         const snapshot = JSON.parse(JSON.stringify(payload));
         const privateData = needsPrivacy(snapshot);
-        Promise.all([privateData ? directory() : [], privateData ? identity(req.headers['x-admin-pin'], accountToken) : null])
-          .then(([users, currentIdentity]) => sendJson(protectPayload(snapshot, users, currentIdentity?.tag, req.query?.search)))
+        if (!privateData) {
+          sendJson(snapshot);
+          return res;
+        }
+        Promise.all([directory(), identity(req.headers['x-admin-pin'], accountToken)])
+          .then(([users, currentIdentity]) => sendJson(protectPayload(snapshot, users, currentIdentity?.tag, req.query?.search, supportResponse)))
           .catch(() => { if (!res.headersSent) { res.status(503); sendJson({ error: 'Phone privacy verification unavailable. Please retry.' }); } });
         return res;
       };
@@ -362,19 +515,31 @@ function createAdminPrivacy(models) {
   function protectSocket(socket) {
     const send = socket.emit.bind(socket);
     let queue = Promise.resolve();
+    let currentRoundInFlight = false;
     socket.emit = (event, payload, sharedDirectory = null) => {
       const snapshot = payload === undefined ? undefined : JSON.parse(JSON.stringify(payload));
+      // Countdown and wallet amounts contain no client identity; keep them immediate and cheap.
+      if (!needsPrivacy(snapshot)) {
+        if (socket.connected) send(event, snapshot);
+        return socket;
+      }
+      if (event === 'admin_current_round') {
+        if (currentRoundInFlight) return socket;
+        currentRoundInFlight = true;
+      }
       queue = queue.then(async () => {
-        // Countdown and wallet amounts contain no client identity; keep them immediate and cheap.
-        if (!needsPrivacy(snapshot)) {
-          if (socket.connected) send(event, snapshot);
-          return;
+        try {
+          const [users, pinIdentity] = await Promise.all([
+            sharedDirectory || directory(), identity(socket.handshake.auth?.pinToken, socket.handshake.auth?.token)
+          ]);
+          if (socket.connected) send(event, protectPayload(snapshot, users, pinIdentity?.tag, '', event === 'support_ticket_update'));
+        } finally {
+          if (event === 'admin_current_round') currentRoundInFlight = false;
         }
-        const [users, pinIdentity] = await Promise.all([
-          sharedDirectory || directory(), identity(socket.handshake.auth?.pinToken, socket.handshake.auth?.token)
-        ]);
-        if (socket.connected) send(event, protectPayload(snapshot, users, pinIdentity?.tag));
-      }).catch(() => { if (socket.connected) send('admin_privacy_unavailable', { message: 'Phone privacy verification unavailable.' }); });
+      }).catch(() => {
+        if (event === 'admin_current_round') currentRoundInFlight = false;
+        if (socket.connected) send('admin_privacy_unavailable', { message: 'Phone privacy verification unavailable.' });
+      });
       return socket;
     };
   }
@@ -389,7 +554,7 @@ function createAdminPrivacy(models) {
       return true;
     };
   }
-  return { directory, identity, unlock, lock, configure, claim, middleware, protectSocket, protectNamespace };
+  return { directory, identity, unlock, lock, configure, claim, getAdminTags, addAdminTag, removeAdminTag, middleware, protectSocket, protectNamespace };
 }
 
 module.exports = { ADMIN_TAGS, PIN_SESSION_MS, normalizePhone, maskPhone, protectPayload, adminClientScope, adminTicketScope, createAdminPrivacy };

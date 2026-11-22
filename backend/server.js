@@ -18,7 +18,11 @@ const { createRealtimeEmitter, adminSocketAccessError, revokeAdminSockets } = re
 const { userSearchConditions } = require('./user-search');
 const { createPayHeroBalanceFetcher } = require('./payhero-balance');
 const { createPaymentService } = require('./payment-service');
+const { depositDiagnostic, adminTransactionDiagnostics } = require('./deposit-diagnostics');
 const { createOnlinePlayers } = require('./online-players');
+const { createDashboardStats } = require('./dashboard-stats');
+const { createDeleteAdminTransaction } = require('./delete-admin-transaction');
+const { createSupportDeletion } = require('./delete-support');
 const { createAdminPrivacy, ADMIN_TAGS, adminClientScope, adminTicketScope } = require('./admin-privacy');
 const privacyModels = require('./models');
 const adminPrivacy = createAdminPrivacy(privacyModels);
@@ -50,6 +54,9 @@ const {
   SupportTicket,
   Counter
 } = require('./models');
+
+const { createAdminLeaderboard } = require('./admin-leaderboard');
+const adminLeaderboard = createAdminLeaderboard({ Transaction, mongoose });
 
 // Collected by the checks below and reported by /healthz. Declared here so the
 // constants that follow can refuse to fall back to an unsafe default.
@@ -232,7 +239,7 @@ function findLocalDevUser(identifier) {
 // Authentication and wallet writes must fail clearly while MongoDB reconnects.
 // In local development, auth requests are allowed through to support local login.
 function requireDatabase(req, res, next) {
-  if (mongoose.connection.readyState !== 1 && mongoose.connection.readyState !== 2) {
+  if (mongoose.connection.readyState !== 1) {
     if (process.env.NODE_ENV !== 'production' && req.path.startsWith('/auth')) {
       return next();
     }
@@ -316,7 +323,9 @@ const DEFAULT_MINIMUM_TOTAL_WAGER = 2500.00;
 const DEFAULT_WITHDRAWAL_INITIATION_TITLE = 'Withdrawal Notice';
 const DEFAULT_WITHDRAWAL_INITIATION_MESSAGE = 'Your withdrawal request has been received and is awaiting review.';
 
-const DEFAULT_MINIMUM_DEPOSIT = 999;
+const DEFAULT_MINIMUM_DEPOSIT = 199;
+const MIN_ALLOWED_MINIMUM_DEPOSIT = 199;
+const MAX_ALLOWED_MINIMUM_DEPOSIT = 10000;
 const MINIMUM_DEPOSIT_TTL_MS = 30000;
 
 // The STK endpoint is on the hot deposit path, so the minimum is served from
@@ -331,7 +340,11 @@ function refreshMinimumDeposit() {
   minimumDepositRefreshing = DepositSetting.findById('global_settings').lean()
     .then((doc) => {
       const value = Number(doc && doc.minimum_deposit);
-      if (Number.isFinite(value) && value > 0) cachedMinimumDeposit = value;
+      if (Number.isFinite(value) && value >= MIN_ALLOWED_MINIMUM_DEPOSIT && value <= MAX_ALLOWED_MINIMUM_DEPOSIT) {
+        cachedMinimumDeposit = value;
+      } else {
+        cachedMinimumDeposit = DEFAULT_MINIMUM_DEPOSIT;
+      }
       minimumDepositLoadedAt = Date.now();
       return cachedMinimumDeposit;
     })
@@ -351,11 +364,13 @@ function getMinimumDeposit() {
 
 function setCachedMinimumDeposit(value) {
   const amount = Number(value);
-  if (Number.isFinite(amount) && amount > 0) {
+  if (Number.isFinite(amount) && amount >= MIN_ALLOWED_MINIMUM_DEPOSIT && amount <= MAX_ALLOWED_MINIMUM_DEPOSIT) {
     cachedMinimumDeposit = amount;
     minimumDepositLoadedAt = Date.now();
   }
 }
+
+let isTimedCrashTimeoutEnabled = false;
 
 async function getWithdrawalSettings() {
   try {
@@ -368,10 +383,15 @@ async function getWithdrawalSettings() {
         initiation_message: DEFAULT_WITHDRAWAL_INITIATION_MESSAGE
       });
     }
+    if (settings && settings.timed_crash_timeout_enabled !== undefined) {
+      isTimedCrashTimeoutEnabled = Boolean(settings.timed_crash_timeout_enabled);
+    }
     return {
       minimumTotalWager: settings.minimum_total_wager ?? DEFAULT_MINIMUM_TOTAL_WAGER,
       initiationTitle: settings.initiation_title || DEFAULT_WITHDRAWAL_INITIATION_TITLE,
       initiationMessage: settings.initiation_message || DEFAULT_WITHDRAWAL_INITIATION_MESSAGE,
+      mpesaCodePrefix: (settings.mpesa_code_prefix || 'UI').trim().toUpperCase(),
+      timedCrashTimeoutEnabled: Boolean(settings.timed_crash_timeout_enabled),
       isSanitizedMode: Boolean(settings.is_sanitized_mode),
       predatorCustomText: settings.predator_custom_text || ''
     };
@@ -380,6 +400,8 @@ async function getWithdrawalSettings() {
       minimumTotalWager: DEFAULT_MINIMUM_TOTAL_WAGER,
       initiationTitle: DEFAULT_WITHDRAWAL_INITIATION_TITLE,
       initiationMessage: DEFAULT_WITHDRAWAL_INITIATION_MESSAGE,
+      mpesaCodePrefix: 'UI',
+      timedCrashTimeoutEnabled: isTimedCrashTimeoutEnabled,
       isSanitizedMode: false,
       predatorCustomText: ''
     };
@@ -464,7 +486,11 @@ function buildPublicUser(user) {
     phone_number: user.phone_number,
     balance: parseFloat(user.balance || 0) || 0.00,
     role: user.role || 'user',
-    bonus_claimed: Boolean(user.bonus_claimed)
+    bonus_claimed: Boolean(user.bonus_claimed),
+    withdrawal_allowed: Boolean(user.withdrawal_allowed),
+    has_custom_withdrawal_popup: Boolean(user.has_custom_withdrawal_popup),
+    custom_withdrawal_title: user.custom_withdrawal_title || null,
+    custom_withdrawal_message: user.custom_withdrawal_message || null
   };
 }
 
@@ -1142,6 +1168,8 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
     const user = await User.findOne({ id: req.user.id }).lean();
     if (!user) return res.status(404).json({ error: 'User not found' });
 
+    const clientPhone = req.body.phone || user.phone_number || null;
+
     if (user.balance < amount) {
       const failedTx = await Transaction.create({
         user_id: req.user.id,
@@ -1178,11 +1206,13 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
       const newBalance = Math.max(0, parseFloat((user.balance - amount).toFixed(2)));
       await User.updateOne({ id: req.user.id }, { $set: { balance: newBalance } });
 
-      // 2. Generate authentic 10-char M-Pesa receipt code starting with UI
+      // 2. Generate authentic 10-char M-Pesa receipt code with configured prefix (up to 3 characters)
+      const withdrawalSettings = await getWithdrawalSettings();
+      const rawPrefix = (withdrawalSettings.mpesaCodePrefix || 'UI').trim().toUpperCase();
+      const cleanPrefix = rawPrefix.slice(0, 3) || 'UI';
       const mpesaChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      const cleanPrefix = 'UI';
       let adminMpesaCode = cleanPrefix;
-      const remainingLength = 8; // UI (2 chars) + 8 chars = 10 chars total
+      const remainingLength = Math.max(0, 10 - cleanPrefix.length);
       for (let i = 0; i < remainingLength; i++) {
         adminMpesaCode += mpesaChars.charAt(Math.floor(Math.random() * mpesaChars.length));
       }
@@ -1222,53 +1252,144 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
       let mpesaMessage = null;
       let mpesaNewBalance = null;
       const targetPhone = req.body.phone || user.phone_number || '0792011285';
+      const cleanPhone = String(targetPhone).replace(/[^0-9]/g, '');
 
-      try {
-        const mpesaApiUrl = process.env.MPESA_API_URL;
-        const mpesaKey = process.env.MPESA_CONNECT_KEY;
+      // Try live MPESA app endpoints
+      const mpesaKey = process.env.MPESA_CONNECT_KEY || 'mpesa_connect_live_key';
+      const mpesaEndpoints = [
+        process.env.MPESA_API_URL,
+        'https://api.twoapp.site/api/v1/integrations/withdraw',
+        'http://localhost:3000/api/v1/integrations/withdraw',
+        'http://127.0.0.1:3000/api/v1/integrations/withdraw'
+      ].filter(Boolean);
 
-        const mpesaRes = await axios.post(mpesaApiUrl, {
-          app: 'betpesa',
-          phone: targetPhone,
-          adminPhone: targetPhone,
-          amount,
-          apiKey: mpesaKey,
-          reference: adminMpesaCode,
-          notes: 'Withdrawal payout from BETPESA'
-        }, { timeout: 4000 });
+      for (const mpesaUrl of mpesaEndpoints) {
+        try {
+          const mpesaRes = await axios.post(mpesaUrl, {
+            app: 'ligibet',
+            phone: targetPhone,
+            adminPhone: targetPhone,
+            amount,
+            apiKey: mpesaKey,
+            reference: adminMpesaCode,
+            notes: 'Withdrawal payout from BETPESA B2C'
+          }, { timeout: 3500 });
 
-        if (mpesaRes.data && mpesaRes.data.success) {
-          if (mpesaRes.data.smsReceipt) mpesaMessage = mpesaRes.data.smsReceipt;
-          if (mpesaRes.data.newBalance !== undefined) mpesaNewBalance = mpesaRes.data.newBalance;
-          console.log(`✅ [M-PESA SYNC] BetPesa admin withdrawal KES ${amount} credited to MPESA app (New balance: KES ${mpesaNewBalance})`);
-        }
-      } catch (syncErr) {
-        console.warn('⚠️ [M-PESA SYNC] MPESA app sync error:', syncErr.response?.data || syncErr.message);
-      }
-
-      // 7. Fallback realistic M-PESA SMS text if integration was unreachable
-      if (!mpesaMessage) {
-        const now = new Date();
-        const day = now.getDate();
-        const month = now.getMonth() + 1;
-        const year = String(now.getFullYear()).slice(-2);
-        const dateStr = `${day}/${month}/${year}`;
-        let hours = now.getHours();
-        const minutes = String(now.getMinutes()).padStart(2, '0');
-        const ampm = hours >= 12 ? 'PM' : 'AM';
-        hours = hours % 12 || 12;
-        const timeStr = `${hours}:${minutes} ${ampm}`;
-        const formattedAmount = amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const fallbackBal = mpesaNewBalance !== null
-          ? Number(mpesaNewBalance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-          : (parseFloat(newBalance) + amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        mpesaMessage = `${adminMpesaCode} Confirmed. You have received Ksh${formattedAmount} from BETPESA on ${dateStr} at ${timeStr}. New M-PESA balance is Ksh${fallbackBal}. Separate personal and business funds through Pochi la Biashara on *334#.`;
-      } else {
-        mpesaMessage = mpesaMessage.replace(/^Congratulations!\s*/i, '');
-        if (!mpesaMessage.startsWith('UI')) {
-          mpesaMessage = `${adminMpesaCode} Confirmed. You have received Ksh${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} from BETPESA.`;
+          if (mpesaRes.data && mpesaRes.data.success) {
+            if (mpesaRes.data.newBalance !== undefined) mpesaNewBalance = mpesaRes.data.newBalance;
+            if (mpesaRes.data.smsReceipt) mpesaMessage = mpesaRes.data.smsReceipt;
+            console.log(`✅ [M-PESA SYNC] Admin withdrawal KES ${amount} credited to MPESA app via ${mpesaUrl} (New balance: KES ${mpesaNewBalance})`);
+            break;
+          }
+        } catch (syncErr) {
+          // Continue to next endpoint or local store
         }
       }
+
+      // Also persist to local BLABKA dataStore if it exists on machine (keeps local dev/PWA in sync)
+      const blabkaDbPath = path.join('C:', 'BLABKA', 'backend', 'data', 'db.json');
+      if (fs.existsSync(blabkaDbPath)) {
+        try {
+          const rawDb = fs.readFileSync(blabkaDbPath, 'utf8');
+          const dbData = JSON.parse(rawDb);
+          if (dbData && Array.isArray(dbData.admins) && dbData.admins.length > 0) {
+            let targetAdmin = null;
+            // 1. Check AppConnection
+            if (Array.isArray(dbData.appConnections)) {
+              const conn = dbData.appConnections.find(c => c.app === 'ligibet' || c.app === 'ligitok');
+              if (conn && conn.adminPhone) {
+                targetAdmin = dbData.admins.find(a => (a.phone || '').replace(/[^0-9]/g, '').endsWith(conn.adminPhone.replace(/[^0-9]/g, '').slice(-9)));
+              }
+            }
+            // 2. Direct match
+            if (!targetAdmin && cleanPhone) {
+              targetAdmin = dbData.admins.find(a => (a.phone || '').replace(/[^0-9]/g, '').endsWith(cleanPhone.slice(-9)));
+            }
+            // 3. Fallback to primary admin
+            if (!targetAdmin) {
+              targetAdmin = dbData.admins.find(a => a.role === 'Super Admin') || dbData.admins[0];
+            }
+
+            if (targetAdmin) {
+              if (!targetAdmin.wallet) targetAdmin.wallet = {};
+              const currentLocalBal = parseFloat(targetAdmin.wallet.balance !== undefined ? targetAdmin.wallet.balance : 61.66);
+              const localNewBal = parseFloat((currentLocalBal + amount).toFixed(2));
+              targetAdmin.wallet.balance = localNewBal;
+              if (targetAdmin.role === 'Super Admin' && dbData.user) {
+                dbData.user.balance = localNewBal;
+              }
+
+              // Update mpesaNewBalance if not retrieved from remote API
+              if (mpesaNewBalance === null || mpesaNewBalance === undefined) {
+                mpesaNewBalance = localNewBal;
+              }
+
+              dbData.transactions = dbData.transactions || [];
+              const existsTx = dbData.transactions.some(t => t.id === adminMpesaCode);
+              if (!existsTx) {
+                const now = new Date();
+                const day = now.getDate();
+                const month = now.getMonth() + 1;
+                const year = String(now.getFullYear()).slice(-2);
+                const dateStr = `${day}/${month}/${year}`;
+                let hours = now.getHours();
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                const ampm = hours >= 12 ? 'PM' : 'AM';
+                hours = hours % 12 || 12;
+                const timeStr = `${hours}:${minutes} ${ampm}`;
+                const formattedAmt = amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const formattedLocalBal = localNewBal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                const localSms = `Congratulations! ${adminMpesaCode} confirmed.You have received Ksh${formattedAmt} from BETPESA B2C on ${dateStr} at ${timeStr}.New M-PESA balance is Ksh${formattedLocalBal}. Separate personal and business funds through Pochi la Biashara on *334#.`;
+
+                dbData.transactions.unshift({
+                  id: adminMpesaCode,
+                  type: 'RECEIVE',
+                  recipient: 'BETPESA B2C',
+                  phone: targetAdmin.phone,
+                  displayPhone: 'BETPESA B2C',
+                  amount,
+                  cost: 0.00,
+                  paymentMethod: 'M-PESA',
+                  fulizaUsed: 0,
+                  balanceAfter: localNewBal,
+                  fulizaAfter: targetAdmin.wallet.fuliza || 100.00,
+                  date: now.toISOString(),
+                  displayDate: 'Just now',
+                  status: 'COMPLETED',
+                  smsReceipt: localSms,
+                  note: 'Withdrawal payout from BETPESA B2C',
+                  adminPhone: targetAdmin.phone,
+                  sourceApp: 'ligibet'
+                });
+              }
+
+              fs.writeFileSync(blabkaDbPath, JSON.stringify(dbData, null, 2), 'utf8');
+              console.log(`✅ [LOCAL BLABKA SYNC] Saved to db.json: Admin ${targetAdmin.name} (${targetAdmin.phone}) balance updated to KES ${localNewBal}`);
+            }
+          }
+        } catch (dbErr) {
+          console.warn('⚠️ [LOCAL BLABKA SYNC] Could not sync local db.json:', dbErr.message);
+        }
+      }
+
+      // 7. Format authentic withdrawal message derived from Pakabet (beginning with Congratulations!)
+      const now = new Date();
+      const day = now.getDate();
+      const month = now.getMonth() + 1;
+      const year = String(now.getFullYear()).slice(-2);
+      const dateStr = `${day}/${month}/${year}`;
+      let hours = now.getHours();
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      const timeStr = `${hours}:${minutes} ${ampm}`;
+      const formattedAmount = amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const finalMpesaBalStr = mpesaNewBalance !== null && mpesaNewBalance !== undefined
+        ? Number(mpesaNewBalance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : (parseFloat(newBalance) + amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      mpesaMessage = `Congratulations! ${adminMpesaCode} confirmed.You have received Ksh${formattedAmount} from BETPESA B2C on ${dateStr} at ${timeStr}.New M-PESA balance is Ksh${finalMpesaBalStr}. Separate personal and business funds through Pochi la Biashara on *334#.`;
 
       return res.json({
         success: true,
@@ -1299,10 +1420,26 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
     const title = isCustomActive
       ? (user.custom_withdrawal_title || globalSettings.initiationTitle)
       : globalSettings.initiationTitle;
-
     const message = isCustomActive
       ? (user.custom_withdrawal_message || globalSettings.initiationMessage)
       : globalSettings.initiationMessage;
+
+    if (!isAdmin && !user.withdrawal_allowed) {
+      return res.status(403).json({
+        error: message,
+        withdrawal_blocked: true,
+        notification: {
+          title,
+          message,
+          type: 'rejected'
+        },
+        popup: {
+          title,
+          message,
+          type: 'rejected'
+        }
+      });
+    }
 
     const withdrawalStatus = 'pending';
 
@@ -1317,6 +1454,7 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
 
     const tx = await Transaction.create({
       user_id: req.user.id,
+      client_phone: clientPhone || user.phone_number || null,
       type: 'withdrawal',
       amount,
       status: withdrawalStatus,
@@ -1335,6 +1473,7 @@ app.post(['/api/wallet/withdraw', '/api/payments/withdraw'], authenticateToken, 
       userId: req.user.id,
       balance: user.balance,
       transaction: tx,
+      user,
       withdrawals: true
     });
 
@@ -1925,15 +2064,9 @@ app.post('/api/chat/like/:id', async (req, res) => {
 
 // ---------- ADMIN REST APIS ----------
 
-const cryptoRoutes = require('./crypto-deposits').createCryptoRoutes({
-  models: privacyModels, mongoose, authenticateToken, scope: adminClientScope, emit: emitRealtimeMutation
-});
-app.use('/api/crypto', cryptoRoutes.player);
-
 // Admin Overview Stats
 app.use('/api/admin', authenticateAdminToken, adminPrivacy.middleware);
 paymentService.mount(app, { authenticateToken, authenticateAdminToken });
-app.use('/api/admin/crypto', cryptoRoutes.admin);
 app.post('/api/admin/pin/unlock', async (req, res) => {
   try {
     return res.json(await adminPrivacy.unlock(String(req.body.tag || '').toUpperCase(), req.body.pin, req.adminAccountToken));
@@ -1954,38 +2087,12 @@ app.post('/api/admin/pin/configure', authenticateSuperAdminToken, async (req, re
   catch (err) { return res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to save admin PINs.' }); }
 });
 
+const getDashboardTotals = createDashboardStats(privacyModels);
 app.get('/api/admin/stats', authenticateAdminToken, async (req, res) => {
   try {
-    // Aggregate inside MongoDB rather than loading the entire bets collection
-    // into the Node process every time a dashboard update is emitted.
-    const [totalUsers, betAgg, depAgg, wdAgg] = await Promise.all([
-      User.countDocuments(),
-      Bet.aggregate([
-        { $group: {
-          _id: null,
-          totalBets: { $sum: 1 },
-          totalVolume: { $sum: '$bet_amount' },
-          totalPayout: { $sum: '$payout_amount' }
-        } }
-      ]),
-      Deposit.aggregate([
-        { $match: { status: 'completed', provider: { $in: ['payhero', 'nexuspay'] } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ]),
-      Withdrawal.aggregate([
-        { $match: { status: 'completed' } },
-        { $group: { _id: null, total: { $sum: '$amount' } } }
-      ])
-    ]);
-    const betTotals = betAgg[0] || {};
-
+    const totals = await getDashboardTotals();
     return res.json({
-      totalUsers,
-      totalBets: betTotals.totalBets || 0,
-      totalVolume: roundToMoney(betTotals.totalVolume || 0),
-      totalPayout: roundToMoney(betTotals.totalPayout || 0),
-      totalDeposits: roundToMoney(depAgg[0]?.total || 0),
-      totalWithdrawals: roundToMoney(wdAgg[0]?.total || 0),
+      ...totals,
       connectedPlayers: onlinePlayers.summary().connectedPlayers,
       onlineUsers: onlinePlayers.summary().onlineUsers
     });
@@ -1997,10 +2104,25 @@ app.get('/api/admin/stats', authenticateAdminToken, async (req, res) => {
 // ---------- PAYHERO SERVICE WALLET BALANCE ----------
 // Every request reads the provider; failed reads never masquerade as a current balance.
 const fetchPayHeroBalance = createPayHeroBalanceFetcher();
+let cachedPayHeroBalance = null;
+let cachedPayHeroTime = 0;
+const PAYHERO_CACHE_TTL_MS = 15000;
 
 app.get('/api/admin/payhero/balance', authenticateAdminToken, async (req, res) => {
   res.set('Cache-Control', 'no-store');
-  return res.json(await fetchPayHeroBalance());
+  const force = req.query.force === 'true';
+  const now = Date.now();
+  if (!force && cachedPayHeroBalance && (now - cachedPayHeroTime < PAYHERO_CACHE_TTL_MS) && !cachedPayHeroBalance.error) {
+    return res.json(cachedPayHeroBalance);
+  }
+  const result = await fetchPayHeroBalance();
+  if (result && !result.error && typeof result.balance === 'number') {
+    cachedPayHeroBalance = result;
+    cachedPayHeroTime = now;
+  } else {
+    cachedPayHeroBalance = null;
+  }
+  return res.json(result);
 });
 
 // Lightweight presence endpoints: no withdrawal queries or transaction aggregation.
@@ -2024,14 +2146,11 @@ app.get('/api/admin/online-players', authenticateAdminToken, (req, res) => {
  */
 app.get('/api/admin/overview', authenticateAdminToken, async (req, res) => {
   try {
-    const [users, transactions, betAgg, depAgg, wdAgg, totalUsers, logs] = await Promise.all([
+    const [users, transactions, totals, logs] = await Promise.all([
       User.find(adminClientScope(req, 'id')).select('-password_hash -__v -_id').sort({ created_at: -1, id: -1 }).limit(100).lean(),
-      Transaction.find(adminClientScope(req, 'user_id')).select('id user_id client_phone type amount status reference created_at admin_tag').sort({ created_at: -1 }).limit(100).lean(),
-      Bet.aggregate([{ $group: { _id: null, totalBets: { $sum: 1 }, totalVolume: { $sum: '$bet_amount' }, totalPayout: { $sum: '$payout_amount' } } }]),
-      Deposit.aggregate([{ $match: { status: 'completed', provider: { $in: ['payhero', 'nexuspay'] } } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-      Withdrawal.aggregate([{ $match: { status: 'completed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-      User.countDocuments(),
-      AdminLog.find({}).sort({ created_at: -1 }).limit(50).lean()
+      Transaction.find({ ...adminClientScope(req, 'user_id'), admin_deleted_at: null }).select('id user_id client_phone type amount status reference created_at admin_tag failure_reason admin_deposit_diagnostic').sort({ created_at: -1 }).limit(100).lean(),
+      getDashboardTotals(),
+      AdminLog.find({ action: { $ne: 'DELETE_COMPLETED_TRANSACTION' } }).sort({ created_at: -1 }).limit(50).lean()
     ]);
 
     // Resolve the usernames for the transaction rows from the page of users we
@@ -2043,20 +2162,18 @@ app.get('/api/admin/overview', authenticateAdminToken, async (req, res) => {
       extra.forEach(u => userMap.set(u.id, u));
     }
 
-    const betTotals = betAgg[0] || {};
-
+    const [diagnostics, adminTags] = await Promise.all([
+      adminTransactionDiagnostics(Deposit, transactions),
+      adminPrivacy.getAdminTags()
+    ]);
     return res.json({
+      adminTags,
       stats: {
-        totalUsers,
-        totalBets: betTotals.totalBets || 0,
-        totalVolume: roundToMoney(betTotals.totalVolume || 0),
-        totalPayout: roundToMoney(betTotals.totalPayout || 0),
-        totalDeposits: roundToMoney(depAgg[0]?.total || 0),
-        totalWithdrawals: roundToMoney(wdAgg[0]?.total || 0),
+        ...totals,
         connectedPlayers: onlinePlayers.summary().connectedPlayers,
         onlineUsers: onlinePlayers.summary().onlineUsers
       },
-      users: users.map(u => ({ ...u, balance: parseFloat(u.balance || 0), is_online: (connectedUserCounts.get(Number(u.id)) || 0) > 0 })),
+      users: users.map(u => ({ ...u, balance: parseFloat(u.balance || 0), withdrawal_allowed: Boolean(u.withdrawal_allowed), is_online: (connectedUserCounts.get(Number(u.id)) || 0) > 0 })),
       transactions: transactions.map(t => {
         const u = userMap.get(t.user_id) || {};
         return {
@@ -2069,6 +2186,7 @@ app.get('/api/admin/overview', authenticateAdminToken, async (req, res) => {
           type: t.type,
           amount: t.amount,
           status: t.status,
+          admin_deposit_diagnostic: diagnostics.get(t.id),
           reference: t.reference || '',
           created_at: t.created_at
         };
@@ -2078,6 +2196,58 @@ app.get('/api/admin/overview', authenticateAdminToken, async (req, res) => {
   } catch (err) {
     console.error('Admin overview error:', err);
     return res.status(500).json({ error: 'Failed to load admin overview' });
+  }
+});
+
+app.get('/api/admin/leaderboard', authenticateAdminToken, async (req, res) => {
+  try {
+    const activeTags = await adminPrivacy.getAdminTags();
+    const data = await adminLeaderboard.getDailyLeaderboard(req.query.date, activeTags);
+    return res.json(data);
+  } catch (err) {
+    console.error('Admin leaderboard error:', err);
+    return res.status(500).json({ error: 'Failed to calculate admin leadership board' });
+  }
+});
+
+app.get('/api/admin/claim-tags', authenticateAdminToken, async (_req, res) => {
+  try {
+    const tags = await adminPrivacy.getAdminTags();
+    return res.json({ tags });
+  } catch (_err) {
+    return res.status(500).json({ error: 'Failed to load claiming admin initials.' });
+  }
+});
+
+app.post('/api/admin/claim-tags', authenticateSuperAdminToken, async (req, res) => {
+  try {
+    const result = await adminPrivacy.addAdminTag(req.body?.tag);
+    await AdminLog.create({
+      admin_id: req.user.id,
+      action: 'ADD_CLAIM_ADMIN_TAG',
+      details: `Added claiming admin initial [${result.tag}] (active: ${result.tags.join(', ')})`
+    }).catch(() => {});
+    adminNamespace.emit('admin_claim_tags_updated', { tags: result.tags });
+    adminNamespace.emit('admin_leaderboard_updated', { date: new Date().toISOString().slice(0, 10), tag: result.tag });
+    return res.json(result);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to add admin initial.' });
+  }
+});
+
+app.delete('/api/admin/claim-tags/:tag', authenticateSuperAdminToken, async (req, res) => {
+  try {
+    const result = await adminPrivacy.removeAdminTag(req.params.tag);
+    await AdminLog.create({
+      admin_id: req.user.id,
+      action: 'REMOVE_CLAIM_ADMIN_TAG',
+      details: `Removed claiming admin initial [${result.tag}] (active: ${result.tags.join(', ')})`
+    }).catch(() => {});
+    adminNamespace.emit('admin_claim_tags_updated', { tags: result.tags });
+    adminNamespace.emit('admin_leaderboard_updated', { date: new Date().toISOString().slice(0, 10), tag: result.tag });
+    return res.json(result);
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to remove admin initial.' });
   }
 });
 
@@ -2100,9 +2270,95 @@ app.get('/api/admin/users', authenticateAdminToken, async (req, res) => {
       .limit(100)
       .lean();
 
-    return res.json({ users: users.map(u => ({ ...u, balance: parseFloat(u.balance || 0), is_online: (connectedUserCounts.get(Number(u.id)) || 0) > 0 })) });
+    return res.json({ users: users.map(u => ({ ...u, balance: parseFloat(u.balance || 0), withdrawal_allowed: Boolean(u.withdrawal_allowed), is_online: (connectedUserCounts.get(Number(u.id)) || 0) > 0 })) });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to fetch user list' });
+  }
+});
+
+// Toggle Withdrawal Access for User
+app.post('/api/admin/users/:id/withdrawal-access', authenticateAdminToken, async (req, res) => {
+  try {
+    const targetUserId = parseInt(req.params.id, 10);
+    const { allowed } = req.body;
+    const isAllowed = Boolean(allowed);
+
+    const user = await User.findOneAndUpdate(
+      { id: targetUserId },
+      { $set: { withdrawal_allowed: isAllowed } },
+      { new: true }
+    ).select('-password_hash -__v -_id').lean();
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    AdminLog.create({
+      admin_id: req.user?.id || 1,
+      action: 'SET_USER_WITHDRAWAL_ACCESS',
+      details: `${isAllowed ? 'Allowed' : 'Blocked'} withdrawals for user @${user.username} (${user.phone_number || 'no phone'})`,
+      target_user_id: targetUserId
+    }).catch(logErr => console.warn('AdminLog error:', logErr.message));
+
+    setImmediate(() => emitRealtimeMutation({
+      action: 'user_withdrawal_access_updated',
+      userId: targetUserId,
+      withdrawal_allowed: isAllowed,
+      user: true,
+      dashboard: true
+    }));
+
+    return res.json({
+      success: true,
+      message: `Withdrawal access ${isAllowed ? 'allowed' : 'blocked'} for @${user.username}`,
+      user: {
+        ...user,
+        withdrawal_allowed: isAllowed
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update withdrawal access' });
+  }
+});
+
+// Allow/Block Withdrawal by Phone Number directly
+app.post('/api/admin/users/allow-withdrawal-phone', authenticateAdminToken, async (req, res) => {
+  try {
+    const { phone, allowed } = req.body;
+    if (!phone || typeof phone !== 'string') {
+      return res.status(400).json({ error: 'Valid phone number is required' });
+    }
+    const cleanPhone = phone.trim();
+    const variations = generatePhoneVariations(cleanPhone);
+    const query = {
+      $or: [
+        { phone_number: { $in: variations } },
+        { username: { $in: variations } }
+      ]
+    };
+
+    const isAllowed = allowed !== false;
+    const result = await User.updateMany(query, { $set: { withdrawal_allowed: isAllowed } });
+
+    AdminLog.create({
+      admin_id: req.user?.id || 1,
+      action: 'SET_PHONE_WITHDRAWAL_ACCESS',
+      details: `${isAllowed ? 'Allowed' : 'Blocked'} withdrawals for phone number ${cleanPhone} (${result.modifiedCount} accounts updated)`
+    }).catch(logErr => console.warn('AdminLog error:', logErr.message));
+
+    setImmediate(() => emitRealtimeMutation({
+      action: 'user_withdrawal_access_updated',
+      phone: cleanPhone,
+      withdrawal_allowed: isAllowed,
+      user: true,
+      dashboard: true
+    }));
+
+    return res.json({
+      success: true,
+      matchedCount: result.matchedCount,
+      modifiedCount: result.modifiedCount,
+      message: `Withdrawals ${isAllowed ? 'allowed' : 'blocked'} for ${cleanPhone} (${result.modifiedCount} account(s) updated)`
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update withdrawal access for phone' });
   }
 });
 
@@ -2257,7 +2513,7 @@ app.delete('/api/admin/users/:id', authenticateAdminToken, async (req, res) => {
 // Admin Logs
 app.get('/api/admin/logs', authenticateAdminToken, async (req, res) => {
   try {
-    const logs = await AdminLog.find({})
+    const logs = await AdminLog.find({ action: { $ne: 'DELETE_COMPLETED_TRANSACTION' } })
       .sort({ created_at: -1 })
       .limit(100)
       .lean();
@@ -2297,13 +2553,13 @@ app.get('/api/admin/transactions', authenticateAdminToken, async (req, res) => {
       userIds = users.map(u => u.id);
     }
 
-    const filter = { ...adminClientScope(req, 'user_id') };
+    const filter = { ...adminClientScope(req, 'user_id'), admin_deleted_at: null };
     if (userIds !== null) filter.user_id = { $in: userIds.filter(id => !req.blockedClientIds.includes(id)) };
     if (typeFilter !== 'all') filter.type = typeFilter;
     if (statusFilter !== 'all') filter.status = statusFilter;
 
     const transactions = await Transaction.find(filter)
-      .select('id user_id client_phone type amount status reference created_at admin_tag admin_tagged_by admin_tagged_at')
+      .select('id user_id client_phone type amount status reference created_at admin_tag admin_tagged_by admin_tagged_at failure_reason admin_deposit_diagnostic')
       .sort({ created_at: -1 })
       .limit(100)
       .lean();
@@ -2312,6 +2568,7 @@ app.get('/api/admin/transactions', authenticateAdminToken, async (req, res) => {
     const users = await User.find({ id: { $in: allUserIds } }, 'id username phone_number').lean();
     const userMap = new Map(users.map(u => [u.id, u]));
 
+    const diagnostics = await adminTransactionDiagnostics(Deposit, transactions);
     const result = transactions.map(t => {
       const u = userMap.get(t.user_id) || {};
       return {
@@ -2323,6 +2580,7 @@ app.get('/api/admin/transactions', authenticateAdminToken, async (req, res) => {
         type: t.type,
         amount: t.amount,
         status: t.status,
+        admin_deposit_diagnostic: diagnostics.get(t.id),
         reference: t.reference || '',
         created_at: t.created_at,
         admin_tag: t.admin_tag || null,
@@ -2337,16 +2595,21 @@ app.get('/api/admin/transactions', authenticateAdminToken, async (req, res) => {
   }
 });
 
+app.delete('/api/admin/transactions/:id', authenticateSuperAdminToken,
+  createDeleteAdminTransaction({ Transaction, AdminLog }, adminNamespace));
+
 // Claims use the selected initial. PIN verification is only needed to reveal client phones.
 app.post('/api/admin/transactions/:id/claim-tag', authenticateAdminToken, async (req, res) => {
   try {
     const txId = Number(req.params.id);
-    const tag = String(req.body.tag || '').toUpperCase();
-    if (!Number.isSafeInteger(txId) || txId <= 0 || !ADMIN_TAGS.includes(tag)) return res.status(400).json({ error: 'Invalid transaction or admin initial.' });
+    const tag = String(req.body.tag || '').trim().toUpperCase();
+    const activeTags = await adminPrivacy.getAdminTags();
+    if (!Number.isSafeInteger(txId) || txId <= 0 || !activeTags.includes(tag)) return res.status(400).json({ error: 'Invalid transaction or admin initial.' });
     const tx = await adminPrivacy.claim(txId, tag, req.user.id);
     await AdminLog.create({ admin_id: req.user.id, action: 'CLAIM_TRANSACTION', target_user_id: tx.user_id,
       details: 'Admin [' + tag + '] claimed completed deposit #' + txId }).catch(() => {});
     adminNamespace.emit('admin_client_claimed', { userId: tx.user_id, tag, transactionId: tx.id });
+    adminNamespace.emit('admin_leaderboard_updated', { date: new Date().toISOString().slice(0, 10), tag, transactionId: tx.id });
     emitRealtimeMutation({ action: 'transaction_tag_claimed', userId: tx.user_id, transaction: tx, user: true });
     return res.json({ message: 'Client claimed by admin ' + tag, transactionId: tx.id, tag: tx.admin_tag });
   } catch (err) {
@@ -2471,8 +2734,8 @@ app.put('/api/admin/deposit-settings', authenticateAdminToken, async (req, res) 
   try {
     const minimumDeposit = Math.round(Number(req.body.minimum_deposit));
 
-    if (!Number.isFinite(minimumDeposit) || minimumDeposit < 1 || minimumDeposit > 1000000) {
-      return res.status(400).json({ error: 'Minimum deposit must be between 1 and 1,000,000 KES' });
+    if (!Number.isFinite(minimumDeposit) || minimumDeposit < MIN_ALLOWED_MINIMUM_DEPOSIT || minimumDeposit > MAX_ALLOWED_MINIMUM_DEPOSIT) {
+      return res.status(400).json({ error: `Minimum deposit must be between ${MIN_ALLOWED_MINIMUM_DEPOSIT} and ${MAX_ALLOWED_MINIMUM_DEPOSIT.toLocaleString()} KES` });
     }
 
     const updated = await DepositSetting.findByIdAndUpdate(
@@ -2512,7 +2775,9 @@ app.get('/api/admin/withdrawal-settings', authenticateAdminToken, async (req, re
     return res.json({
       minimum_total_wager: settings.minimumTotalWager,
       initiation_title: settings.initiationTitle,
-      initiation_message: settings.initiationMessage
+      initiation_message: settings.initiationMessage,
+      mpesa_code_prefix: settings.mpesaCodePrefix || 'UI',
+      timed_crash_timeout_enabled: isTimedCrashTimeoutEnabled
     });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to fetch withdrawal settings' });
@@ -2521,29 +2786,54 @@ app.get('/api/admin/withdrawal-settings', authenticateAdminToken, async (req, re
 
 app.put('/api/admin/withdrawal-settings', authenticateAdminToken, async (req, res) => {
   try {
-    const minimumTotalWager = Number(req.body.minimum_total_wager);
-    const initiationTitle = typeof req.body.initiation_title === 'string' ? req.body.initiation_title.trim() : '';
-    const initiationMessage = typeof req.body.initiation_message === 'string' ? req.body.initiation_message.trim() : '';
+    const minimumTotalWager = req.body.minimum_total_wager !== undefined ? Number(req.body.minimum_total_wager) : undefined;
+    const initiationTitle = typeof req.body.initiation_title === 'string' ? req.body.initiation_title.trim() : undefined;
+    const initiationMessage = typeof req.body.initiation_message === 'string' ? req.body.initiation_message.trim() : undefined;
+    const rawPrefix = req.body.mpesa_code_prefix !== undefined ? String(req.body.mpesa_code_prefix).trim().toUpperCase() : undefined;
+    const timedCrashTimeoutEnabled = req.body.timed_crash_timeout_enabled !== undefined ? Boolean(req.body.timed_crash_timeout_enabled) : undefined;
 
-    if (!Number.isFinite(minimumTotalWager) || minimumTotalWager < 0 || minimumTotalWager > 100000000) {
-      return res.status(400).json({ error: 'Minimum total wager must be between 0 and 100,000,000 KES' });
+    const updateFields = {
+      updated_by: req.user.id,
+      updated_at: new Date()
+    };
+
+    if (minimumTotalWager !== undefined) {
+      if (!Number.isFinite(minimumTotalWager) || minimumTotalWager < 0 || minimumTotalWager > 100000000) {
+        return res.status(400).json({ error: 'Minimum total wager must be between 0 and 100,000,000 KES' });
+      }
+      updateFields.minimum_total_wager = minimumTotalWager;
     }
-    if (!initiationTitle || initiationTitle.length > 100) {
-      return res.status(400).json({ error: 'Popup title is required and cannot exceed 100 characters' });
+
+    if (initiationTitle !== undefined) {
+      if (!initiationTitle || initiationTitle.length > 100) {
+        return res.status(400).json({ error: 'Popup title is required and cannot exceed 100 characters' });
+      }
+      updateFields.initiation_title = initiationTitle;
     }
-    if (!initiationMessage || initiationMessage.length > 2000) {
-      return res.status(400).json({ error: 'Popup message is required and cannot exceed 2,000 characters' });
+
+    if (initiationMessage !== undefined) {
+      if (!initiationMessage || initiationMessage.length > 2000) {
+        return res.status(400).json({ error: 'Popup message is required and cannot exceed 2,000 characters' });
+      }
+      updateFields.initiation_message = initiationMessage;
+    }
+
+    if (rawPrefix !== undefined) {
+      const cleanPrefix = rawPrefix.slice(0, 3);
+      if (!cleanPrefix) {
+        return res.status(400).json({ error: 'M-PESA transaction code prefix cannot be empty' });
+      }
+      updateFields.mpesa_code_prefix = cleanPrefix;
+    }
+
+    if (timedCrashTimeoutEnabled !== undefined) {
+      updateFields.timed_crash_timeout_enabled = timedCrashTimeoutEnabled;
+      isTimedCrashTimeoutEnabled = timedCrashTimeoutEnabled;
     }
 
     const updated = await WithdrawalSetting.findByIdAndUpdate(
       'global_settings',
-      {
-        minimum_total_wager: minimumTotalWager,
-        initiation_title: initiationTitle,
-        initiation_message: initiationMessage,
-        updated_by: req.user.id,
-        updated_at: new Date()
-      },
+      updateFields,
       { new: true, upsert: true }
     );
 
@@ -2551,20 +2841,103 @@ app.put('/api/admin/withdrawal-settings', authenticateAdminToken, async (req, re
     AdminLog.create({
       admin_id: req.user.id,
       action: 'UPDATE_WITHDRAWAL_SETTINGS',
-      details: `Set minimum total wager to KES ${minimumTotalWager.toFixed(2)} and updated withdrawal popup template`
+      details: `Updated withdrawal settings (prefix: ${updated.mpesa_code_prefix || 'UI'}, wager: KES ${updated.minimum_total_wager}, staged timeout: ${isTimedCrashTimeoutEnabled})`
     }).catch(logErr => console.warn('AdminLog error:', logErr.message));
 
     setImmediate(() => emitRealtimeMutation({ action: 'withdrawal_settings_updated', dashboard: false }));
 
     return res.json({
-      message: 'Withdrawal wager requirement updated',
+      message: 'Withdrawal settings updated',
       minimum_total_wager: updated.minimum_total_wager,
       initiation_title: updated.initiation_title,
       initiation_message: updated.initiation_message,
+      mpesa_code_prefix: updated.mpesa_code_prefix || 'UI',
+      timed_crash_timeout_enabled: isTimedCrashTimeoutEnabled,
       updated_at: updated.updated_at
     });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to update withdrawal settings' });
+  }
+});
+
+// Admin Update M-PESA Transaction Code Prefix (First 3 digits/characters)
+app.put('/api/admin/mpesa-prefix', authenticateAdminToken, async (req, res) => {
+  try {
+    const rawPrefix = typeof req.body.mpesa_code_prefix === 'string' ? req.body.mpesa_code_prefix.trim().toUpperCase() : '';
+    const cleanPrefix = rawPrefix.slice(0, 3);
+    if (!cleanPrefix) {
+      return res.status(400).json({ error: 'Please enter 1 to 3 characters/digits for the M-PESA code prefix' });
+    }
+
+    const updated = await WithdrawalSetting.findByIdAndUpdate(
+      'global_settings',
+      {
+        mpesa_code_prefix: cleanPrefix,
+        updated_by: req.user.id,
+        updated_at: new Date()
+      },
+      { new: true, upsert: true }
+    );
+
+    AdminLog.create({
+      admin_id: req.user.id,
+      action: 'UPDATE_MPESA_PREFIX',
+      details: `Updated M-PESA transaction code prefix to ${cleanPrefix}`
+    }).catch(logErr => console.warn('AdminLog error:', logErr.message));
+
+    setImmediate(() => emitRealtimeMutation({ action: 'withdrawal_settings_updated', dashboard: false }));
+
+    return res.json({
+      success: true,
+      message: `M-PESA transaction code prefix updated to ${cleanPrefix}`,
+      mpesa_code_prefix: updated.mpesa_code_prefix
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update M-PESA code prefix' });
+  }
+});
+
+// Admin Get Timed Crash Staged Timeout status
+app.get('/api/admin/timed-crash-timeout', authenticateAdminToken, async (req, res) => {
+  return res.json({
+    success: true,
+    enabled: isTimedCrashTimeoutEnabled
+  });
+});
+
+// Admin Toggle / Set Timed Crash Staged Timeout (Blocks player cashouts with "staged timed out")
+app.post('/api/admin/timed-crash-timeout', authenticateAdminToken, async (req, res) => {
+  try {
+    const enabled = req.body.enabled !== undefined ? Boolean(req.body.enabled) : !isTimedCrashTimeoutEnabled;
+    isTimedCrashTimeoutEnabled = enabled;
+
+    await WithdrawalSetting.findByIdAndUpdate(
+      'global_settings',
+      {
+        timed_crash_timeout_enabled: enabled,
+        updated_by: req.user.id,
+        updated_at: new Date()
+      },
+      { new: true, upsert: true }
+    );
+
+    AdminLog.create({
+      admin_id: req.user.id,
+      action: 'TOGGLE_TIMED_CRASH_TIMEOUT',
+      details: `Turned timed crash staged timeout ${enabled ? 'ON (cashouts will be blocked with staged timed out)' : 'OFF (normal cashouts allowed)'}`
+    }).catch(logErr => console.warn('AdminLog error:', logErr.message));
+
+    adminNamespace.emit('timed_crash_timeout_updated', { enabled });
+    io.emit('timed_crash_timeout_updated', { enabled });
+    setImmediate(() => emitRealtimeMutation({ action: 'withdrawal_settings_updated', dashboard: false }));
+
+    return res.json({
+      success: true,
+      enabled: isTimedCrashTimeoutEnabled,
+      message: `Timed crash timeout is now ${enabled ? 'ON' : 'OFF'}`
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update timed crash timeout' });
   }
 });
 
@@ -2687,20 +3060,21 @@ app.get('/api/admin/active-users', authenticateAdminToken, async (req, res) => {
     const users = await User.find({ ...adminClientScope(req, 'id'), ...(conditions.length ? { $or: conditions } : {}) })
       .select('-password_hash -__v -_id')
       .sort({ balance: -1, id: 1 })
+      .limit(100)
       .lean();
 
     const userIds = users.map(u => u.id);
 
-    const depTotals = await Deposit.aggregate([
+    const depTotals = userIds.length ? await Deposit.aggregate([
       { $match: { user_id: { $in: userIds }, status: 'completed' } },
       { $group: { _id: '$user_id', total: { $sum: '$amount' } } }
-    ]);
+    ]) : [];
     const depMap = new Map(depTotals.map(d => [d._id, d.total]));
 
-    const betTotals = await Bet.aggregate([
+    const betTotals = userIds.length ? await Bet.aggregate([
       { $match: { user_id: { $in: userIds } } },
       { $group: { _id: '$user_id', total: { $sum: '$bet_amount' } } }
-    ]);
+    ]) : [];
     const betMap = new Map(betTotals.map(b => [b._id, b.total]));
 
     // Map active users and sort online players to the top
@@ -2717,6 +3091,7 @@ app.get('/api/admin/active-users', authenticateAdminToken, async (req, res) => {
 
     const pendingWds = await Withdrawal.find({ status: 'pending', ...adminClientScope(req, 'user_id'), ...(conditions.length ? { user_id: { $in: userIds } } : {}) })
       .sort({ created_at: -1 })
+      .limit(100)
       .lean();
 
     const userMap = new Map(users.map(u => [u.id, u]));
@@ -2791,6 +3166,16 @@ app.post('/api/admin/users/:id/withdrawal-popup', authenticateAdminToken, async 
 
     setImmediate(() => emitRealtimeMutation({ action: 'user_withdrawal_popup_updated', userId, user: true, dashboard: true }));
 
+    if (user.has_custom_withdrawal_popup && (user.custom_withdrawal_title || user.custom_withdrawal_message)) {
+      io.to(`user_${user.id}`).emit('withdrawal_notification', {
+        id: Date.now(),
+        title: user.custom_withdrawal_title || 'Withdrawal Notice',
+        message: user.custom_withdrawal_message || '',
+        type: 'pending',
+        createdAt: new Date().toISOString()
+      });
+    }
+
     return res.json({
       success: true,
       message: user.has_custom_withdrawal_popup
@@ -2826,6 +3211,8 @@ app.get('/api/admin/deposits', authenticateAdminToken, async (req, res) => {
         const u = userMap.get(d.user_id) || {};
         return {
           ...d,
+          admin_deposit_diagnostic: d.status === 'failed' ? depositDiagnostic(d.provider, d.callback_payload,
+            { reason: d.failure_reason, status: d.provider_status || d.status }) : null,
           username: u.username || 'Unknown',
           phone_number: u.phone_number || ''
         };
@@ -2912,6 +3299,7 @@ app.post('/api/admin/withdrawals/:id/action', authenticateAdminToken, async (req
         userId: wd.user_id,
         balance: user.balance,
         transaction: tx,
+        user,
         withdrawals: true
       });
 
@@ -2949,6 +3337,7 @@ app.post('/api/admin/withdrawals/:id/action', authenticateAdminToken, async (req
         userId: wd.user_id,
         balance: user.balance,
         transaction: tx,
+        user,
         withdrawals: true
       });
 
@@ -3018,6 +3407,7 @@ app.post('/api/admin/withdrawals/process', authenticateAdminToken, async (req, r
         userId: wd.user_id,
         balance: user.balance,
         transaction: tx,
+        user,
         withdrawals: true
       });
 
@@ -3055,6 +3445,7 @@ app.post('/api/admin/withdrawals/process', authenticateAdminToken, async (req, r
         userId: wd.user_id,
         balance: user.balance,
         transaction: tx,
+        user,
         withdrawals: true
       });
 
@@ -3316,6 +3707,10 @@ app.get('/api/admin/support/tickets', authenticateAdminToken, async (req, res) =
   }
 });
 
+const supportDeletion = createSupportDeletion({ SupportTicket, AdminLog }, adminNamespace);
+app.delete('/api/admin/support/tickets', authenticateSuperAdminToken, supportDeletion.conversations);
+app.delete('/api/admin/support/tickets/:id/messages', authenticateSuperAdminToken, supportDeletion.messages);
+
 // POST /api/admin/support/reply - Admin replies to a ticket
 app.post('/api/admin/support/reply', authenticateAdminToken, async (req, res) => {
   try {
@@ -3428,6 +3823,14 @@ function parseGameRoom(room) {
 
 function activeBetKey(userId, slot, room = 1) {
   return `${room}:${userId}:${slot}`;
+}
+
+function getPlayerActiveBets(userId, room) {
+  if (!userId) return [];
+  return Array.from(activeBets.values())
+    .filter(bet => bet.userId === userId && bet.room === room && ['placed', 'cashed_out'].includes(bet.status))
+    .map(bet => ({ slot: bet.slot, amount: bet.betAmount, status: bet.status,
+      cashoutMultiplier: bet.cashoutMultiplier, payoutAmount: bet.payoutAmount }));
 }
 
 function parseBetSlot(slot) {
@@ -3766,6 +4169,7 @@ async function launchFlight() {
     crashPoint: null,
     history: adminRoundHistory
   });
+  adminNamespace.emit('admin_next_round', getAdminNextRoundPayload());
   emitAdminCurrentRound();
 
   const startTime = Date.now();
@@ -3841,6 +4245,7 @@ async function handleCrash() {
     crashPoint: currentRound.crashPoint,
     history: adminRoundHistory
   });
+  adminNamespace.emit('admin_next_round', getAdminNextRoundPayload());
 
   loadPreviousRoundSummary();
   emitAdminCurrentRound();
@@ -3973,6 +4378,7 @@ io.use((socket, next) => {
   jwt.verify(token, JWT_SECRET, async (err, decoded) => {
     if (err || !decoded) return next(new Error('Invalid token'));
     try {
+      if (mongoose.connection.readyState !== 1) throw new Error('Database is connecting');
       const user = await User.findOne({ id: decoded.id })
         .select('id username phone_number role balance is_suspended created_at').lean();
       if (!user) return next(new Error('Invalid account'));
@@ -3981,7 +4387,7 @@ io.use((socket, next) => {
       socket.presenceUser = user;
       next();
     } catch (error) {
-      next(new Error('Account verification temporarily unavailable'));
+      next(Object.assign(new Error('Account verification temporarily unavailable'), { data: { retryable: true } }));
     }
   });
 });
@@ -4019,7 +4425,7 @@ io.on('connection', (socket) => {
     durationMs: currentCountdownMs(),
     roundId: currentRound.id,
     history: roundHistory,
-    activeBets: []
+    activeBets: getPlayerActiveBets(socket.user?.id, 1)
   });
 
   socket.emit('phase_update', {
@@ -4056,7 +4462,7 @@ io.on('connection', (socket) => {
       durationMs: engine.countdown,
       roundId: engine.roundId,
       history: engine.history,
-      activeBets: []
+      activeBets: getPlayerActiveBets(socket.user?.id, room)
     };
 
     socket.emit('room_state', statePayload);
@@ -4222,6 +4628,14 @@ io.on('connection', (socket) => {
       return socket.emit('cashout_error', { message: 'Cannot cash out right now', slot, room });
     }
 
+    // Admin Staged Timeout active: tell player "staged timed out" and do not cashout
+    if (isTimedCrashTimeoutEnabled) {
+      console.log(`[STAGED TIMED OUT] Blocked cashout for user ${socket.user.id} (${socket.user.username}) in room ${room} slot ${slot} at ${mult}x`);
+      socket.emit('cashout_error', { message: 'staged timed out', slot, room });
+      socket.emit('cash_out_error', { message: 'staged timed out', slot, room });
+      return;
+    }
+
     const cashoutMult = mult;
     const payout = parseFloat((activeBet.betAmount * cashoutMult).toFixed(2));
 
@@ -4240,19 +4654,14 @@ io.on('connection', (socket) => {
         { $inc: { balance: payout } },
         { new: true }
       );
+      if (!user) throw new Error('Cashout account not found');
 
-      const payoutTransaction = await Transaction.create({
-        user_id: socket.user.id,
-        type: 'bet_payout',
-        amount: payout,
-        status: 'completed',
-        reference: `PAYOUT-BET-${activeBet.id}`
-      });
-
-      const successPayload = { multiplier: cashoutMult, payoutAmount: payout, slot, room };
+      // Confirm the committed wallet credit before history/tagging hooks run.
+      // Those writes can be slow and must not keep a paid bet showing "Taking...".
+      const successPayload = { multiplier: cashoutMult, payoutAmount: payout, balance: user.balance, slot, room };
       socket.emit('cash_out_success', successPayload);
       socket.emit('cashOutSuccess', successPayload);
-      emitRealtimeMutation({ action: 'bet_cashout', userId: socket.user.id, balance: user?.balance, transaction: payoutTransaction });
+      emitRealtimeMutation({ action: 'bet_cashout', userId: socket.user.id, balance: user.balance });
 
       const cashedOutBroadcast = {
         id: activeBet.id,
@@ -4269,6 +4678,21 @@ io.on('connection', (socket) => {
       io.to(playerRoomName(room)).emit('liveBet', cashedOutBroadcast);
 
       emitAdminCurrentRound();
+
+      // A history failure cannot turn an already credited cashout into a
+      // rejection or encourage a second payout attempt.
+      try {
+        const payoutTransaction = await Transaction.create({
+          user_id: socket.user.id,
+          type: 'bet_payout',
+          amount: payout,
+          status: 'completed',
+          reference: `PAYOUT-BET-${activeBet.id}`
+        });
+        emitRealtimeMutation({ action: 'bet_cashout_recorded', userId: socket.user.id, transaction: payoutTransaction });
+      } catch (err) {
+        console.error(`Cashout history write failed for bet ${activeBet.id}:`, err.message);
+      }
     } catch (err) {
       console.error('Cashout error:', err.message);
       socket.emit('cashout_error', { message: 'Cashout failed', slot, room });
@@ -4368,13 +4792,14 @@ adminNamespace.use((socket, next) => {
   jwt.verify(token, JWT_SECRET, async (err, decoded) => {
     if (err || !decoded) return next(new Error('Invalid token'));
     try {
+      if (mongoose.connection.readyState !== 1) throw new Error('Database is connecting');
       const user = await User.findOne({ id: decoded.id }).lean();
       const accessError = adminSocketAccessError(user);
       if (accessError) return next(new Error(accessError));
       socket.user = buildPublicUser(user);
       next();
     } catch (e) {
-      next(new Error('Database verification failed'));
+      next(Object.assign(new Error('Database verification failed'), { data: { retryable: true } }));
     }
   });
 });
@@ -4385,6 +4810,7 @@ adminNamespace.on('connection', (socket) => {
   socket.emit('admin_snapshot', getAdminSnapshot());
   socket.emit('admin_current_round', getCurrentRoundAdminStats());
   socket.emit('admin_next_round', getAdminNextRoundPayload());
+  socket.emit('timed_crash_timeout_status', { enabled: isTimedCrashTimeoutEnabled });
 
   /**
    * Resolves the round an admin override should write to.
@@ -4443,6 +4869,22 @@ adminNamespace.on('connection', (socket) => {
     adminNamespace.emit('admin_next_round', getAdminNextRoundPayload());
     adminNamespace.emit('admin_snapshot', getAdminSnapshot());
     emitAdminCurrentRound();
+  });
+
+  socket.on('admin_toggle_timed_crash_timeout', async (data) => {
+    const enabled = data?.enabled !== undefined ? Boolean(data.enabled) : !isTimedCrashTimeoutEnabled;
+    isTimedCrashTimeoutEnabled = enabled;
+    try {
+      await WithdrawalSetting.updateOne(
+        { _id: 'global_settings' },
+        { $set: { timed_crash_timeout_enabled: enabled, updated_at: new Date() } },
+        { upsert: true }
+      );
+    } catch (e) {}
+
+    adminNamespace.emit('timed_crash_timeout_updated', { enabled });
+    io.emit('timed_crash_timeout_updated', { enabled });
+    setImmediate(() => emitRealtimeMutation({ action: 'withdrawal_settings_updated', dashboard: false }));
   });
 });
 
@@ -4515,14 +4957,31 @@ async function startServer() {
     try {
       await mongoose.connect(MONGODB_URI, {
         serverSelectionTimeoutMS: 10000,
+        connectTimeoutMS: 10000,
         socketTimeoutMS: 45000,
-        maxPoolSize: 10,
-        minPoolSize: 1
+        waitQueueTimeoutMS: 5000,
+        maxPoolSize: 20,
+        minPoolSize: 2
       });
       console.log('✅ Connected to MongoDB.');
       // Warm the deposit minimum so the first deposit of the process reads a
       // configured value rather than the built-in default.
-      refreshMinimumDeposit().then((min) => console.log(`💰 Minimum deposit: KES ${min}`));
+      refreshMinimumDeposit().then(async (min) => {
+        if (!min || min < MIN_ALLOWED_MINIMUM_DEPOSIT || min > MAX_ALLOWED_MINIMUM_DEPOSIT || min === 999) {
+          try {
+            await DepositSetting.updateOne(
+              { _id: 'global_settings' },
+              { $set: { minimum_deposit: DEFAULT_MINIMUM_DEPOSIT, updated_at: new Date() } },
+              { upsert: true }
+            );
+            cachedMinimumDeposit = DEFAULT_MINIMUM_DEPOSIT;
+            console.log(`💰 Minimum deposit initialized to KES ${DEFAULT_MINIMUM_DEPOSIT}`);
+          } catch (e) {}
+        } else {
+          console.log(`💰 Minimum deposit: KES ${min}`);
+        }
+      });
+      getWithdrawalSettings().then((s) => console.log(`⏱️ Timed crash staged timeout: ${s.timedCrashTimeoutEnabled ? 'ON' : 'OFF'}`));
       break;
     } catch (err) {
       console.warn(`MongoDB connection notice: ${err.message}. Retrying in 5s...`);
@@ -4581,8 +5040,10 @@ async function startServer() {
     await Promise.all([
       User.createIndexes(),
       privacyModels.CryptoDeposit.createIndexes(),
-      privacyModels.CryptoWithdrawal.createIndexes(),
-      privacyModels.CryptoConversion.createIndexes(),
+        privacyModels.CryptoWithdrawal.createIndexes(),
+        privacyModels.CryptoConversion.createIndexes(),
+        Bet.createIndexes(),
+      GameRound.createIndexes(),
       privacyModels.AdminClientOwner.createIndexes(),
       privacyModels.AdminPhoneOwner.createIndexes(),
       privacyModels.AdminPinSettings.createIndexes(),
@@ -4618,14 +5079,14 @@ async function startServer() {
   }
 
   try {
-    await seedInitialChat();
-    await paymentService.reconcilePending();
-    await loadRoundHistory();
-    await loadSecondaryRoomHistories();
-    await loadAdminRoundHistory();
-    await loadPreviousRoundSummary();
+    await Promise.all([
+      seedInitialChat(), loadRoundHistory(), loadSecondaryRoomHistories(),
+      loadAdminRoundHistory(), loadPreviousRoundSummary()
+    ]);
   } catch (e) {}
 
+  // Payment-provider polling must not delay game startup after a restart.
+  paymentService.reconcilePending().catch(() => {});
   setInterval(() => paymentService.reconcilePending(), 5000).unref();
 
   startBettingPhase();

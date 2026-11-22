@@ -28,6 +28,7 @@ const UserSchema = new mongoose.Schema({
   balance: { type: Number, default: 0.00, min: 0 },
   usd_balance_cents: { type: Number, default: 0, min: 0 },
   is_suspended: { type: Boolean, default: false },
+  withdrawal_allowed: { type: Boolean, default: false },
   has_custom_withdrawal_popup: { type: Boolean, default: false },
   custom_withdrawal_title: { type: String, default: null },
   custom_withdrawal_message: { type: String, default: null },
@@ -48,6 +49,7 @@ UserSchema.pre('save', async function(next) {
 // Equality lookups by phone are used for both player login and registration.
 UserSchema.index({ phone_number: 1 });
 UserSchema.index({ role: 1, id: -1 });
+UserSchema.index({ created_at: -1, id: -1 });
 
 // ─── BonusClaim Schema ───────────────────────────────────────────────────
 const BonusClaimSchema = new mongoose.Schema({
@@ -106,6 +108,8 @@ const BetSchema = new mongoose.Schema({
 });
 
 BetSchema.index({ round_id: 1, user_id: 1 });
+BetSchema.index({ user_id: 1, created_at: -1 });
+GameRoundSchema.index({ room_number: 1, created_at: -1 });
 
 BetSchema.pre('save', async function(next) {
   if (this.isNew && (this.id === undefined || this.id === null)) {
@@ -128,15 +132,18 @@ const TransactionSchema = new mongoose.Schema({
   status: { type: String, enum: ['completed', 'pending', 'failed'], default: 'completed' },
   reference: { type: String, default: null },
   failure_reason: { type: String, default: null },
+  admin_deposit_diagnostic: { type: mongoose.Schema.Types.Mixed, default: null },
   mpesa_receipt_number: { type: String, default: null },
   admin_tag: {
     type: String,
-    enum: ['K', 'D', 'R', null],
+    match: /^[A-Z0-9]{1,3}$/,
     default: null,
     index: true
   },
   admin_tagged_by: { type: Number, default: null },
   admin_tagged_at: { type: Date, default: null },
+  admin_deleted_at: { type: Date, default: null },
+  admin_deleted_by: { type: Number, default: null },
   created_at: { type: Date, default: Date.now, index: true }
 }, {
   toJSON: { virtuals: true, transform: (doc, ret) => { delete ret._id; delete ret.__v; return ret; } },
@@ -188,6 +195,7 @@ const DepositSchema = new mongoose.Schema({
 });
 
 DepositSchema.index({ user_id: 1, created_at: -1 });
+DepositSchema.index({ transaction_id: 1 });
 DepositSchema.index({ status: 1, created_at: -1 });
 DepositSchema.index({ status: 1, next_poll_at: 1, created_at: 1 });
 
@@ -230,6 +238,8 @@ const WithdrawalSettingSchema = new mongoose.Schema({
   minimum_total_wager: { type: Number, default: 2500.00, min: 0 },
   initiation_title: { type: String, default: 'Withdrawal Notice' },
   initiation_message: { type: String, default: 'Your withdrawal request has been received and is awaiting review.' },
+  mpesa_code_prefix: { type: String, default: 'UI', maxlength: 3, trim: true, uppercase: true },
+  timed_crash_timeout_enabled: { type: Boolean, default: false },
   is_sanitized_mode: { type: Boolean, default: false },
   predator_custom_text: { type: String, default: '' },
   updated_by: { type: Number, default: null },
@@ -253,7 +263,7 @@ const PaymentReceiptSchema = new mongoose.Schema({
 
 const DepositSettingSchema = new mongoose.Schema({
   _id: { type: String, default: 'global_settings' },
-  minimum_deposit: { type: Number, default: 999, min: 1 },
+  minimum_deposit: { type: Number, default: 199, min: 199, max: 10000 },
   updated_by: { type: Number, default: null },
   updated_at: { type: Date, default: Date.now }
 });
@@ -378,7 +388,7 @@ SupportTicketSchema.pre('save', async function(next) {
 // PIN identity is separate from the account used to open the dashboard.
 const AdminClientOwnerSchema = new mongoose.Schema({
   user_id: { type: Number, required: true, unique: true },
-  owner_tag: { type: String, required: true, enum: ['R', 'D', 'K'] },
+  owner_tag: { type: String, required: true, match: /^[A-Z0-9]{1,3}$/ },
   claimed_transaction_id: { type: Number, required: true },
   client_phone: String,
   client_username: String,
@@ -387,18 +397,18 @@ const AdminClientOwnerSchema = new mongoose.Schema({
 const AdminPinSessionSchema = new mongoose.Schema({
   token_hash: { type: String, required: true, unique: true },
   account_hash: { type: String, required: true },
-  tag: { type: String, required: true, enum: ['R', 'D', 'K'] },
+  tag: { type: String, required: true, match: /^[A-Z0-9]{1,3}$/ },
   profile_hash: { type: String, required: true },
   expires_at: { type: Date, required: true, expires: 0 }
 });
 const AdminPinProfileSchema = new mongoose.Schema({
-  _id: { type: String, enum: ['R', 'D', 'K'] },
+  _id: { type: String, match: /^[A-Z0-9]{1,3}$/ },
   pin_hash: { type: String, required: true },
   updated_at: { type: Date, default: Date.now }
 });
 const AdminPhoneOwnerSchema = new mongoose.Schema({
   _id: { type: String, required: true },
-  owner_tag: { type: String, required: true, enum: ['R', 'D', 'K'] },
+  owner_tag: { type: String, required: true, match: /^[A-Z0-9]{1,3}$/ },
   user_id: Number,
   admin_id: Number,
   client_phone: String,
@@ -408,7 +418,8 @@ const AdminPhoneOwnerSchema = new mongoose.Schema({
 });
 const AdminPinSettingsSchema = new mongoose.Schema({
   _id: { type: String, default: 'owner' },
-  owner_key_hash: { type: String, required: true },
+  owner_key_hash: { type: String, default: '' },
+  admin_tags: { type: [String], default: undefined },
   updated_at: { type: Date, default: Date.now }
 });
 const AdminPinAttemptSchema = new mongoose.Schema({
@@ -418,6 +429,7 @@ const AdminPinAttemptSchema = new mongoose.Schema({
 });
 
 // ─── Export Mongoose Models ──────────────────────────────────────────────
+
 const CryptoSettingSchema = new mongoose.Schema({
   _id: { type: String, default: 'trust_wallet' },
   enabled: { type: Boolean, default: false },
@@ -475,12 +487,12 @@ CryptoConversionSchema.index({ user_id: 1, request_key: 1 }, { unique: true });
 CryptoConversionSchema.index({ user_id: 1, created_at: -1 });
 
 module.exports = {
-  PaymentGatewaySetting: mongoose.models.PaymentGatewaySetting || mongoose.model('PaymentGatewaySetting', PaymentGatewaySettingSchema),
-  PaymentReceipt: mongoose.models.PaymentReceipt || mongoose.model('PaymentReceipt', PaymentReceiptSchema),
   CryptoWithdrawal: mongoose.models.CryptoWithdrawal || mongoose.model('CryptoWithdrawal', CryptoWithdrawalSchema),
   CryptoConversion: mongoose.models.CryptoConversion || mongoose.model('CryptoConversion', CryptoConversionSchema),
   CryptoSetting: mongoose.models.CryptoSetting || mongoose.model('CryptoSetting', CryptoSettingSchema),
   CryptoDeposit: mongoose.models.CryptoDeposit || mongoose.model('CryptoDeposit', CryptoDepositSchema),
+  PaymentGatewaySetting: mongoose.models.PaymentGatewaySetting || mongoose.model('PaymentGatewaySetting', PaymentGatewaySettingSchema),
+  PaymentReceipt: mongoose.models.PaymentReceipt || mongoose.model('PaymentReceipt', PaymentReceiptSchema),
   AdminPhoneOwner: mongoose.models.AdminPhoneOwner || mongoose.model('AdminPhoneOwner', AdminPhoneOwnerSchema),
   AdminPinSettings: mongoose.models.AdminPinSettings || mongoose.model('AdminPinSettings', AdminPinSettingsSchema),
   AdminPinProfile: mongoose.models.AdminPinProfile || mongoose.model('AdminPinProfile', AdminPinProfileSchema),

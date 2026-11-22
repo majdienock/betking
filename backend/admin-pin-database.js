@@ -1,4 +1,4 @@
-const ADMIN_TAGS = ['R', 'D', 'K'];
+const ADMIN_TAGS = ['R', 'G', 'S', 'V'];
 const validHash = value => /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(String(value || ''));
 
 // One-time import of old settings; runtime PIN verification reads only MongoDB.

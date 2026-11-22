@@ -19,6 +19,7 @@ import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { ChatMessage, GameRoom, GameSocketService, LiveBetBroadcast, RoomState } from '../../../core/services/game-socket.service';
 import { AuthService, User, TransactionRecord } from '../../../core/services/auth.service';
+import { withdrawalErrorPopup } from '../../../core/services/withdrawal-feedback';
 import { SanitizedModeService } from '../../../core/services/sanitized-mode.service';
 import { getBackendOrigin } from '../../../core/config/backend-url';
 import { CryptoWalletComponent } from '../../../shared/crypto-wallet/crypto-wallet.component';
@@ -168,6 +169,8 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   });
 
   public liveBets = signal<LiveBet[]>([]);
+  private stagedTimedOut1: boolean = false;
+  private stagedTimedOut2: boolean = false;
   private readonly maxBetFeedSize = 3000;
   private readonly visibleBetRows = 100;
 
@@ -206,15 +209,16 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   public isSendingWalletSupport = signal<boolean>(false);
   public walletSupportStatusMsg = signal<string | null>(null);
   public walletSupportMessages = signal<Array<{ sender: 'user' | 'admin'; sender_name?: string; text: string; created_at: string }>>([]);
-  public depositVal = signal<number>(999);
-  public minimumDeposit = signal<number>(999);
+  public depositVal = signal<number>(199);
+  public minimumDeposit = signal<number>(199);
   // The first pill is always the configured minimum; the rest are the standard
   // top-ups that still clear it, so no pill can offer an amount the server rejects.
   public depositPresets = computed<number[]>(() => {
-    const minimum = this.minimumDeposit();
-    const presets = [minimum, ...[1000, 2000, 3000, 5000, 10000].filter(value => value > minimum)];
-    while (presets.length < 6) presets.push(presets[presets.length - 1] * 2);
-    return presets.slice(0, 6);
+    const minimum = Math.max(199, this.minimumDeposit());
+    const candidates = [minimum, 500, 1000, 2000, 5000, 10000];
+    const unique = Array.from(new Set(candidates.filter(val => val >= minimum && val <= 10000)));
+    unique.sort((a, b) => a - b);
+    return unique.slice(0, 6);
   });
   public depositSelectedPreset = signal<number | null>(null);
   public depositPresetTapCount = signal<number>(0);
@@ -836,7 +840,6 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
         if (c && (c.room === undefined || c.room === this.selectedRoom())) {
           const panel = this.resolveResponsePanel(c.slot);
           if (panel) this.confirmCashout(panel, c.multiplier, c.payoutAmount);
-          this.triggerCashoutNotification(c.multiplier, c.payoutAmount, c.slot || 1);
         }
       }),
       this.gameSocket.betPlacedBroadcast$.subscribe(b => {
@@ -849,8 +852,16 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
         if (err && (err.room === undefined || err.room === this.selectedRoom())) {
           if (err.slot) {
             this.setPanelPending(err.slot, false);
+            if (err.message === 'staged timed out') {
+              if (err.slot === 1) this.stagedTimedOut1 = true;
+              if (err.slot === 2) this.stagedTimedOut2 = true;
+            }
           } else {
             this.clearPendingPanels();
+            if (err.message === 'staged timed out') {
+              this.stagedTimedOut1 = true;
+              this.stagedTimedOut2 = true;
+            }
           }
           this.showToast(err.message, true);
         }
@@ -989,6 +1000,8 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   public onRoundStart(durationMs = 5000) {
+    this.stagedTimedOut1 = false;
+    this.stagedTimedOut2 = false;
     this.gameState.set('WAITING');
     this.currentMultiplier.set(1.00);
     this.flightProgress = 0;
@@ -1165,6 +1178,8 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
     }
 
     // Current-round bets are over. A queued next-round stake is preserved.
+    this.stagedTimedOut1 = false;
+    this.stagedTimedOut2 = false;
     this.panel1.update(p => ({ ...p, placedAmount: 0, isPending: false, hasActiveBet: false }));
     this.panel2.update(p => ({ ...p, placedAmount: 0, isPending: false, hasActiveBet: false }));
 
@@ -1310,12 +1325,12 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   // --------------------------------------------------------------------------
   private evaluateAutoCashouts(mult: number) {
     const p1 = this.panel1();
-    if ((p1.mode === 'auto' || p1.autoCashOutEnabled) && p1.hasActiveBet && !p1.hasCashedOut && mult >= p1.autoTarget) {
+    if ((p1.mode === 'auto' || p1.autoCashOutEnabled) && p1.hasActiveBet && !p1.hasCashedOut && !this.stagedTimedOut1 && mult >= p1.autoTarget) {
       this.cashOut(1);
     }
 
     const p2 = this.panel2();
-    if (this.showPanel2() && (p2.mode === 'auto' || p2.autoCashOutEnabled) && p2.hasActiveBet && !p2.hasCashedOut && mult >= p2.autoTarget) {
+    if (this.showPanel2() && (p2.mode === 'auto' || p2.autoCashOutEnabled) && p2.hasActiveBet && !p2.hasCashedOut && !this.stagedTimedOut2 && mult >= p2.autoTarget) {
       this.cashOut(2);
     }
   }
@@ -1669,19 +1684,23 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.withdrawalNotif.set({
       id: payload.id,
-      title: payload.title || 'BetPesa Notification',
+      title: payload.title || 'Withdrawal Notice',
       message: payload.message,
       type: payload.type || 'info',
       timestamp
     });
-    // Auto-dismiss after 6 seconds so the player can read the admin-edited message
+    // Auto-dismiss after 20 seconds so the player has ample time to read the message, or dismiss via OK
     this.withdrawalNotifTimeout = setTimeout(() => {
       this.withdrawalNotif.set(null);
-    }, 6000);
+      this.withdrawalNotifTimeout = null;
+    }, 20000);
   }
 
   public dismissWithdrawalNotification() {
-    if (this.withdrawalNotifTimeout) clearTimeout(this.withdrawalNotifTimeout);
+    if (this.withdrawalNotifTimeout) {
+      clearTimeout(this.withdrawalNotifTimeout);
+      this.withdrawalNotifTimeout = null;
+    }
     this.withdrawalNotif.set(null);
   }
 
@@ -2677,7 +2696,8 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
 
   public adjustDepositAmount(delta: number) {
     const current = this.depositVal() || 0;
-    this.depositVal.set(Math.max(10, current + delta));
+    const minimum = this.minimumDeposit() || 199;
+    this.depositVal.set(Math.max(minimum, current + delta));
     // Deselect any preset when manually adjusting
     this.depositSelectedPreset.set(null);
     this.depositPresetTapCount.set(0);
@@ -2884,34 +2904,28 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
           });
           this.showToast('Withdrawal submitted successfully!', false);
         } else {
-          const notification = typeof res.notification === 'string'
-            ? {
-                id: Date.now(),
-                title: 'Withdrawal Notice',
-                message: res.notification,
-                type: res.status === 'completed' ? 'completed' : 'pending',
-                createdAt: new Date().toISOString()
-              }
-            : res.notification;
-          this.walletTab.set('withdraw');
+          const popupData = res.popup || (typeof res.notification === 'object' && res.notification !== null ? res.notification : null);
+          const notification = {
+            id: Date.now(),
+            title: popupData?.title || 'Withdrawal Notice',
+            message: popupData?.message || (typeof res.notification === 'string' ? res.notification : res.message) || 'Withdrawal submitted and awaiting admin review.',
+            type: popupData?.type || (res.status === 'completed' ? 'completed' : 'pending'),
+            createdAt: new Date().toISOString()
+          };
+          this.showWalletModal.set(false);
           this.showWithdrawalNotification(notification);
-          setTimeout(() => this.showWalletModal.set(false), 6000);
         }
         this.loadTransactionsHistory();
         this.isSubmittingWithdrawal.set(false);
       },
-      error: (message: string) => {
-        const errorMsg = message || 'Insufficient funds to complete this withdrawal.';
-        const isInsufficient = errorMsg.toLowerCase().includes('insufficient') || errorMsg.toLowerCase().includes('balance');
+      error: (error: unknown) => {
         this.walletTab.set('withdraw');
+        this.showWalletModal.set(false);
         this.showWithdrawalNotification({
           id: Date.now(),
-          title: isInsufficient ? 'Insufficient Funds' : 'Withdrawal Notice',
-          message: errorMsg,
-          type: 'rejected',
+          ...withdrawalErrorPopup(error),
           createdAt: new Date().toISOString()
         });
-        this.showToast(errorMsg, true);
         this.transactionHistoryTab.set('withdrawal');
         this.loadTransactionsHistory();
         this.isSubmittingWithdrawal.set(false);
