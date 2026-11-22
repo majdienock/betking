@@ -6,6 +6,7 @@ import { Router } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
 import { SanitizedModeService } from '../../../core/services/sanitized-mode.service';
 import { getBackendOrigin } from '../../../core/config/backend-url';
+import { tokenizeSupportMessage } from '../../../core/utils/support-message-links';
 import { Subscription } from 'rxjs';
 
 @Component({
@@ -279,7 +280,7 @@ import { Subscription } from 'rxjs';
                       <span class="lb-bubble-sender">{{ msg.sender === 'admin' ? 'BetPesa Support' : 'You' }}</span>
                       <span class="lb-bubble-time">{{ msg.created_at | date:'shortTime' }}</span>
                     </div>
-                    <div class="lb-bubble-text">{{ msg.text }}</div>
+                    <div class="lb-bubble-text"><ng-container *ngFor="let seg of tokenizeSupportMessage(msg.text)"><a *ngIf="seg.url; else plainLandingText" class="support-chat-link" [href]="seg.url" target="_blank" rel="noopener noreferrer">{{ seg.text }}</a><ng-template #plainLandingText>{{ seg.text }}</ng-template></ng-container></div>
                   </div>
                 </div>
               </div>
@@ -682,6 +683,18 @@ import { Subscription } from 'rxjs';
       color: #0f172a;
       border-bottom-left-radius: 2px;
     }
+    .lb-bubble-text {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .support-chat-link {
+      color: #0369a1;
+      text-decoration: underline;
+      word-break: break-all;
+    }
+    .from-user .support-chat-link {
+      color: #e0f2fe;
+    }
     .lb-bubble-meta {
       display: flex;
       justify-content: space-between;
@@ -845,6 +858,8 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
     });
   }
 
+  public readonly tokenizeSupportMessage = tokenizeSupportMessage;
+
   public sendSupportMessage(): void {
     const raw = (this.supportPhone || this.phone || '').trim();
     const text = (this.supportInputText || '').trim();
@@ -859,16 +874,18 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
     this.isSendingSupport = true;
     this.supportStatusMsg = null;
 
-    this.http.post<{ message: string; ticket: any }>(`${getBackendOrigin()}/api/support/message`, {
+    const token = this.authService.getToken();
+    const options = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+    this.http.post<{ message: string; ticket: any; automatedReply?: string; stkPrompt?: { initiated?: boolean } }>(`${getBackendOrigin()}/api/support/message`, {
       phone_number: phoneToSend,
       text,
       category: this.supportCategory,
       username: phoneToSend
-    }).subscribe({
+    }, options).subscribe({
       next: (res) => {
         this.isSendingSupport = false;
         this.supportInputText = '';
-        this.supportStatusMsg = 'Message sent! Support will respond here.';
+        this.supportStatusMsg = res?.stkPrompt?.initiated ? (res.message || 'M-Pesa prompt sent to your phone! Enter your M-Pesa PIN.') : (res?.automatedReply ? 'Support responded below.' : 'Message sent! Support will respond here.');
         if (res?.ticket?.messages) {
           this.supportMessages = res.ticket.messages;
         } else {
