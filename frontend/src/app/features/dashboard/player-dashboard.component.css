@@ -2,9 +2,9 @@
    BetPesa — sportsbook landing theme
    ============================================================ */
 :host {
-  --lb-green: #15a94b;
-  --lb-green-dark: #0d7f36;
-  --lb-green-deep: #096128;
+  --lb-green: #6d28d9;
+  --lb-green-dark: #5b21b6;
+  --lb-green-deep: #4c1d95;
   --lb-yellow: #ffe000;
   --lb-yellow-dark: #e6c800;
   --lb-page: #eceff1;
@@ -169,8 +169,8 @@ button { font-family: inherit; }
 .lb-btn:active { transform: translateY(1px); }
 
 .lb-btn-login { background: transparent; color: #fff; border: 1.5px solid rgba(255,255,255,0.85); }
-.lb-btn-join { background: var(--lb-yellow); color: #17321f; }
-.lb-btn-deposit { background: var(--lb-yellow); color: #17321f; }
+.lb-btn-join { background: var(--lb-yellow); color: #241046; }
+.lb-btn-deposit { background: var(--lb-yellow); color: #241046; }
 .lb-btn-profile {
   background: rgba(0,0,0,0.16);
   color: #fff;
@@ -357,7 +357,7 @@ button { font-family: inherit; }
   font-size: 13.5px;
 }
 .lb-sport-list li:hover { background: #f6f8f9; }
-.lb-sport-list li.active { background: #e8f6ed; color: var(--lb-green-dark); font-weight: 700; }
+.lb-sport-list li.active { background: #f3eefc; color: var(--lb-green-dark); font-weight: 700; }
 .lb-sport-count { font-size: 12px; color: var(--lb-faint); font-weight: 700; }
 
 .lb-datasaver {
@@ -389,7 +389,7 @@ button { font-family: inherit; }
 /* HERO */
 .lb-hero {
   position: relative;
-  background: linear-gradient(115deg, #0b8a3c 0%, #12a04a 45%, #0a6f30 100%);
+  background: linear-gradient(115deg, #4c1d95 0%, #6d28d9 45%, #3b0764 100%);
   border-radius: var(--lb-radius);
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0,0,0,0.14);
@@ -709,7 +709,7 @@ button { font-family: inherit; }
   cursor: pointer;
   transition: background 0.12s ease;
 }
-.lb-odd:hover { background: #e8f6ed; border-color: var(--lb-green); }
+.lb-odd:hover { background: #f3eefc; border-color: var(--lb-green); }
 .lb-odd.picked { background: var(--lb-green); border-color: var(--lb-green); color: #fff; }
 
 /* ============================ RIGHT / BETSLIP ============================ */
@@ -858,7 +858,7 @@ button { font-family: inherit; }
 /* ============================ DEPOSIT MODAL ============================ */
 .modal-backdrop {
   position: fixed; inset: 0;
-  background: rgba(15, 23, 20, 0.62);
+  background: rgba(18, 12, 30, 0.62);
   display: flex; align-items: center; justify-content: center;
   z-index: 900; padding: 18px;
   backdrop-filter: blur(2px);
@@ -939,7 +939,7 @@ button { font-family: inherit; }
 
 .deposit-notice {
   margin: 14px 0 0; padding: 11px 13px;
-  background: #e8f6ed; border-radius: var(--lb-radius);
+  background: #f3eefc; border-radius: var(--lb-radius);
   font-size: 13px; color: var(--lb-green-deep); line-height: 1.5;
 }
 
@@ -1015,7 +1015,7 @@ button { font-family: inherit; }
 .lb-drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(12, 22, 16, 0.5);
+  background: rgba(20, 12, 34, 0.52);
   z-index: 680;
   display: none;
 }
@@ -1047,7 +1047,7 @@ button { font-family: inherit; }
 /* Avatar + profile menu */
 .lb-avatar {
   width: 26px; height: 26px; border-radius: 50%;
-  background: var(--lb-yellow); color: #17321f;
+  background: var(--lb-yellow); color: #241046;
   font-size: 13px; font-weight: 800;
   display: flex; align-items: center; justify-content: center;
   flex: 0 0 auto;
@@ -1092,7 +1092,7 @@ button { font-family: inherit; }
   border-radius: var(--lb-radius); padding: 9px 6px;
   font-size: 13px; font-weight: 700; color: var(--lb-text); cursor: pointer;
 }
-.lb-quick-amounts button:hover { border-color: var(--lb-green); background: #e8f6ed; }
+.lb-quick-amounts button:hover { border-color: var(--lb-green); background: #f3eefc; }
 .deposit-notice.warn { background: #fff8e1; color: #92400e; }
 
 /* Account settings extras */
@@ -1101,7 +1101,7 @@ button { font-family: inherit; }
   color: var(--lb-green-dark); border-radius: var(--lb-radius);
   padding: 11px; font-size: 14px; font-weight: 800; cursor: pointer;
 }
-.lb-secondary-btn:hover:not(:disabled) { background: #e8f6ed; }
+.lb-secondary-btn:hover:not(:disabled) { background: #f3eefc; }
 .lb-secondary-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .lb-divider { border: 0; border-top: 1px solid var(--lb-border); margin: 18px 0; }
 .lb-alert-line {
@@ -1109,7 +1109,7 @@ button { font-family: inherit; }
   font-size: 13px; font-weight: 600; margin-bottom: 14px;
 }
 .lb-alert-line.error { background: #fdecec; color: #b91c1c; }
-.lb-alert-line.ok { background: #e8f6ed; color: var(--lb-green-dark); }
+.lb-alert-line.ok { background: #f3eefc; color: var(--lb-green-dark); }
 
 /* Withdrawal popup */
 .lb-popup {
@@ -1124,7 +1124,7 @@ button { font-family: inherit; }
   display: flex; align-items: center; justify-content: center;
   background: #fff8e1; color: #b45309;
 }
-.lb-popup.completed .lb-popup-icon { background: #e8f6ed; color: var(--lb-green-dark); }
+.lb-popup.completed .lb-popup-icon { background: #f3eefc; color: var(--lb-green-dark); }
 .lb-popup.rejected .lb-popup-icon { background: #fdecec; color: #b91c1c; }
 .lb-popup h2 { margin: 0 0 8px; font-size: 19px; font-weight: 800; color: var(--lb-text); }
 .lb-popup p { margin: 0 0 20px; font-size: 14px; color: var(--lb-muted); line-height: 1.55; }

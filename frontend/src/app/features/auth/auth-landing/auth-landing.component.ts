@@ -323,8 +323,8 @@ import { Subscription } from 'rxjs';
   `,
   styles: [`
     :host {
-      --lb-green: #15a94b;
-      --lb-green-dark: #0d7f36;
+      --lb-green: #6d28d9;
+      --lb-green-dark: #5b21b6;
       --lb-yellow: #ffe000;
       --lb-page: #eceff1;
       --lb-card: #ffffff;
@@ -380,21 +380,21 @@ import { Subscription } from 'rxjs';
     /* APP BANNER */
     .lb-auth-app {
       display: flex; align-items: center; gap: 10px;
-      background: #f4f8f5;
-      border: 1px solid #d6e8dc;
+      background: #f6f3fc;
+      border: 1px solid #ddd3f4;
       border-radius: 8px;
       padding: 9px 11px;
       margin-bottom: 18px;
       cursor: pointer;
     }
-    .lb-auth-app:hover { background: #edf5f0; }
+    .lb-auth-app:hover { background: #ece6f8; }
     .lb-auth-app-logo { width: 38px; height: 38px; border-radius: 8px; object-fit: cover; flex: 0 0 auto; }
     .lb-auth-app-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
     .lb-auth-app-title { font-size: 13.5px; font-weight: 800; color: var(--lb-green-dark); }
     .lb-auth-app-sub { font-size: 11.5px; color: var(--lb-muted); }
     .lb-auth-app-btn {
       display: flex; align-items: center; gap: 5px;
-      background: var(--lb-yellow); color: #17321f;
+      background: var(--lb-yellow); color: #241046;
       border: 0; border-radius: 16px;
       padding: 7px 14px; font-size: 12.5px; font-weight: 800; cursor: pointer;
       flex: 0 0 auto;
@@ -429,7 +429,7 @@ import { Subscription } from 'rxjs';
       line-height: 1.45;
     }
     .lb-alert.error { background: #fdecec; color: #b91c1c; border: 1px solid #f6cfcf; }
-    .lb-alert.success { background: #e8f6ed; color: #0d7f36; border: 1px solid #c6e6d3; }
+    .lb-alert.success { background: #f3eefc; color: #5b21b6; border: 1px solid #d4c4f4; }
 
     /* FIELDS */
     .lb-auth-form { display: flex; flex-direction: column; }
@@ -449,7 +449,7 @@ import { Subscription } from 'rxjs';
     .lb-input-box:focus-within {
       border-color: var(--lb-green);
       background: #fff;
-      box-shadow: 0 0 0 3px rgba(21, 169, 75, 0.15);
+      box-shadow: 0 0 0 3px rgba(109, 40, 217, 0.16);
     }
     .lb-phone-prefix { color: var(--lb-green-dark); font-weight: 800; font-size: 15px; }
     .lb-phone-divider { width: 1.5px; height: 22px; background: var(--lb-border); }
@@ -469,7 +469,7 @@ import { Subscription } from 'rxjs';
       caret-color: var(--lb-text);
       transition: background-color 9999s ease-in-out 0s;
     }
-    .lb-input::selection { background: rgba(21, 169, 75, 0.24); }
+    .lb-input::selection { background: rgba(109, 40, 217, 0.24); }
 
     .lb-reveal {
       background: transparent; border: 0; padding: 0 2px;
@@ -514,7 +514,7 @@ import { Subscription } from 'rxjs';
     .lb-step-guide { margin: 0 0 16px; font-size: 13.5px; color: var(--lb-muted); line-height: 1.5; }
     .lb-otp-banner {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      background: #e8f6ed; border-radius: 7px;
+      background: #f3eefc; border-radius: 7px;
       padding: 11px 13px; margin-bottom: 16px;
       font-size: 13px; color: var(--lb-green-dark);
     }
@@ -629,9 +629,9 @@ import { Subscription } from 'rxjs';
       transition: all .15s ease;
     }
     .lb-support-categories button.active {
-      background: #15a94b;
+      background: #6d28d9;
       color: #ffffff;
-      border-color: #15a94b;
+      border-color: #6d28d9;
     }
     .lb-support-thread {
       max-height: 220px;
@@ -674,7 +674,7 @@ import { Subscription } from 'rxjs';
       line-height: 1.35;
     }
     .from-user .lb-support-bubble {
-      background: #15a94b;
+      background: #6d28d9;
       color: #ffffff;
       border-bottom-right-radius: 2px;
     }
@@ -717,7 +717,7 @@ import { Subscription } from 'rxjs';
     .lb-support-send-btn {
       padding: 0 16px;
       border-radius: 7px;
-      background: #15a94b;
+      background: #6d28d9;
       color: #ffffff;
       border: 0;
       font-weight: 700;
@@ -730,7 +730,7 @@ import { Subscription } from 'rxjs';
     }
     .lb-support-feedback {
       font-size: 11px;
-      color: #15a94b;
+      color: #6d28d9;
       text-align: center;
       font-weight: 600;
     }

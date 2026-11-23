@@ -44,13 +44,13 @@ html, body {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: linear-gradient(135deg, rgba(21, 34, 26, 0.96) 0%, rgba(13, 23, 18, 0.98) 100%) !important;
+  background: linear-gradient(135deg, rgba(40, 21, 74, 0.96) 0%, rgba(22, 12, 44, 0.98) 100%) !important;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1.5px solid rgba(246, 197, 111, 0.45) !important;
   border-radius: 18px !important;
   padding: 10px 14px 10px 12px !important;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(27, 163, 115, 0.3) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(109, 40, 217, 0.35) !important;
 }
 
 /* Close Button */
@@ -61,9 +61,9 @@ html, body {
   width: 24px !important;
   height: 24px !important;
   border-radius: 50% !important;
-  background: #1c2b22 !important;
-  border: 1px solid #365342 !important;
-  color: #a0c2b0 !important;
+  background: #2b184f !important;
+  border: 1px solid #4c2b85 !important;
+  color: #c4b5fd !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -74,7 +74,7 @@ html, body {
 }
 
 .btn-dismiss-app:hover {
-  background: #283d30 !important;
+  background: #3b226b !important;
   color: #ffffff !important;
   transform: scale(1.1) !important;
 }
@@ -89,7 +89,7 @@ html, body {
   overflow: hidden !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
   border: 1px solid rgba(246, 197, 111, 0.4) !important;
-  background: #0d1712 !important;
+  background: #1b1033 !important;
 }
 
 .app-icon-img {
@@ -134,13 +134,13 @@ html, body {
 }
 
 .name-bet {
-  color: #48c79c !important;
+  color: #c4b5fd !important;
 }
 
 .badge-official {
-  background: rgba(27, 163, 115, 0.25) !important;
-  color: #34d399 !important;
-  border: 1px solid rgba(52, 211, 153, 0.45) !important;
+  background: rgba(124, 58, 237, 0.28) !important;
+  color: #d8b4fe !important;
+  border: 1px solid rgba(196, 181, 253, 0.45) !important;
   font-size: 9px !important;
   font-weight: 800 !important;
   letter-spacing: 0.5px !important;
@@ -167,12 +167,12 @@ html, body {
 }
 
 .app-size {
-  color: #7aa390 !important;
+  color: #a799c9 !important;
 }
 
 .app-benefits-text {
   font-size: 11px !important;
-  color: #8cb9a3 !important;
+  color: #beb1dd !important;
   margin: 0 !important;
   white-space: nowrap !important;
   overflow: hidden !important;
@@ -269,7 +269,7 @@ html, body {
 
 .ios-install-guide {
   margin-top: 8px !important;
-  background: rgba(13, 23, 18, 0.98) !important;
+  background: rgba(22, 12, 44, 0.98) !important;
   border: 1px solid rgba(246, 197, 111, 0.4) !important;
   border-radius: 12px !important;
   padding: 10px 14px !important;
@@ -289,8 +289,8 @@ html, body {
 }
 
 .btn-got-it {
-  background: #34d399 !important;
-  color: #07120c !important;
+  background: #a78bfa !important;
+  color: #160c2c !important;
   border: none !important;
   border-radius: 8px !important;
   padding: 6px 12px !important;

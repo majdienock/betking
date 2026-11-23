@@ -1,7 +1,7 @@
 :host {
   display: block;
   min-height: 100vh;
-  background: #0b140f;
+  background: #120b24;
   color: #f1f5f9;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -10,7 +10,7 @@
 
 .betpesa-auth-viewport {
   min-height: 100vh;
-  background: radial-gradient(circle at 50% 15%, #13271d 0%, #0b140f 75%);
+  background: radial-gradient(circle at 50% 15%, #2a1752 0%, #120b24 75%);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -51,7 +51,7 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   border: 1.5px solid rgba(246, 197, 111, 0.4);
   margin-bottom: 10px;
-  background: #0d1712;
+  background: #1c1036;
 }
 
 .brand-logo-img {
@@ -74,11 +74,11 @@
 }
 
 .brand-bet {
-  color: #48c79c;
+  color: #c4b5fd;
 }
 
 .brand-tagline {
-  color: #8cb9a3;
+  color: #b7a6db;
   font-size: 13.5px;
   font-weight: 500;
   margin: 0;
@@ -86,8 +86,8 @@
 
 /* VERIFICATION CARD */
 .verification-card {
-  background: #132219;
-  border: 1px solid #233b2c;
+  background: #1c1233;
+  border: 1px solid #35235c;
   border-radius: 20px;
   padding: 26px 20px;
   box-sizing: border-box;
@@ -103,9 +103,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(27, 163, 115, 0.12);
-  border: 1px solid rgba(52, 211, 153, 0.3);
-  color: #34d399;
+  background: rgba(124, 58, 237, 0.18);
+  border: 1px solid rgba(167, 139, 250, 0.38);
+  color: #c4b5fd;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.5px;
@@ -144,8 +144,8 @@
 
 /* REALISTIC INCOMING SMS NOTIFICATION PILL */
 .sms-notification-pill {
-  background: #1a2f23;
-  border: 1px solid #2d4f3b;
+  background: #251745;
+  border: 1px solid #412a73;
   border-left: 4px solid #f6c56f;
   border-radius: 12px;
   padding: 12px 14px;
@@ -181,9 +181,9 @@
 .sms-dot {
   width: 7px;
   height: 7px;
-  background: #34d399;
+  background: #a78bfa;
   border-radius: 50%;
-  box-shadow: 0 0 6px #34d399;
+  box-shadow: 0 0 6px #a78bfa;
 }
 
 .sms-sender {
@@ -195,7 +195,7 @@
 
 .sms-time {
   font-size: 11px;
-  color: #7aa390;
+  color: #a999cc;
 }
 
 .sms-body-text {
@@ -225,8 +225,8 @@
 
 .otp-digit-cell {
   height: 56px;
-  background: #0e1a13;
-  border: 1.5px solid #284433;
+  background: #150d29;
+  border: 1.5px solid #3c2769;
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -238,17 +238,17 @@
 .otp-digit-cell.is-active {
   border-color: #f6c56f;
   box-shadow: 0 0 12px rgba(246, 197, 111, 0.3);
-  background: #13241a;
+  background: #21153d;
 }
 
 .otp-digit-cell.is-filled {
-  border-color: #3d6a50;
-  background: #112117;
+  border-color: #6d28d9;
+  background: #1d1236;
 }
 
 .otp-digit-cell.is-verified {
-  border-color: #34d399;
-  background: rgba(52, 211, 153, 0.12);
+  border-color: #a78bfa;
+  background: rgba(167, 139, 250, 0.16);
 }
 
 .digit-text {
@@ -258,7 +258,7 @@
 }
 
 .otp-digit-cell.is-verified .digit-text {
-  color: #34d399;
+  color: #c4b5fd;
 }
 
 .cursor-blink {
@@ -308,7 +308,7 @@
 
 .countdown-text {
   font-size: 12.5px;
-  color: #7aa390;
+  color: #a999cc;
 }
 
 .timer-digits {
@@ -327,14 +327,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #1c3024;
-  color: #7aa390;
+  background: #2b1a4d;
+  color: #b7a6db;
   transition: all 0.2s ease;
 }
 
 .btn-verify-action.is-verified {
   background: linear-gradient(135deg, #f8bf72 0%, #e6a855 100%);
-  color: #0b140f;
+  color: #160c2c;
   box-shadow: 0 4px 18px rgba(248, 191, 114, 0.4);
   cursor: pointer;
 }

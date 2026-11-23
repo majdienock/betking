@@ -6,8 +6,8 @@
   "id": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0d1712",
-  "theme_color": "#0d1712",
+  "background_color": "#1a1030",
+  "theme_color": "#5b21b6",
   "scope": "/",
   "categories": ["sports", "games", "entertainment"],
   "icons": [
