@@ -124,7 +124,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
   readonly heroBanners = [
     {
       id: 'kings-move',
-      image: 'assets/banners/banner-kings-move.jpg',
+      image: 'assets/banners/banner-kings-move.jpg?v=2',
       headline: 'Arm wrestle your way to',
       prize: 'KSH 1,000,000',
       prizeSuffix: 'every game!',
@@ -135,7 +135,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     },
     {
       id: 'aviator',
-      image: 'assets/banners/banner-aviator.jpg',
+      image: 'assets/banners/banner-aviator.jpg?v=2',
       headline: 'Fly High to the Moon!',
       prize: 'KSH 2,000,000',
       prizeSuffix: 'Max Win',
@@ -146,7 +146,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     },
     {
       id: 'jackpot',
-      image: 'assets/banners/banner-jackpot.jpg',
+      image: 'assets/banners/banner-jackpot.jpg?v=2',
       headline: 'Weekend Football Mega Jackpot',
       prize: 'KSH 50,000,000',
       prizeSuffix: 'Pick 17 Games',
@@ -157,7 +157,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     },
     {
       id: 'bonus',
-      image: 'assets/banners/banner-bonus.jpg',
+      image: 'assets/banners/banner-bonus.jpg?v=2',
       headline: 'Double Your Starting Power!',
       prize: '100% BONUS',
       prizeSuffix: '+ Free Flights',
@@ -173,7 +173,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       return [
         {
           id: 'kings-move',
-          image: 'assets/banners/banner-kings-move.jpg',
+          image: 'assets/banners/banner-kings-move.jpg?v=2',
           headline: 'Arm wrestle your way to',
           prize: 'Champion Tier',
           prizeSuffix: 'every game!',
@@ -184,7 +184,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
         },
         {
           id: 'aviator',
-          image: 'assets/banners/banner-aviator.jpg',
+          image: 'assets/banners/banner-aviator.jpg?v=2',
           headline: 'Rise Up The Leaderboard!',
           prize: 'Top Score',
           prizeSuffix: 'Daily Challenge',
@@ -195,7 +195,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
         },
         {
           id: 'jackpot',
-          image: 'assets/banners/banner-jackpot.jpg',
+          image: 'assets/banners/banner-jackpot.jpg?v=2',
           headline: 'Weekend Football Challenge',
           prize: '17 Matches',
           prizeSuffix: 'Pick 17 Games',
@@ -206,7 +206,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
         },
         {
           id: 'bonus',
-          image: 'assets/banners/banner-bonus.jpg',
+          image: 'assets/banners/banner-bonus.jpg?v=2',
           headline: 'Boost Your Game Experience!',
           prize: 'PRO ACCESS',
           prizeSuffix: '+ Free Access',
@@ -244,7 +244,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     if (tile.id === 'aviator') {
       return 'assets/images/aviator-dashboard-logo.png';
     }
-    return this.photoTiles.includes(tile.id) ? `assets/games/photos/${tile.id}.jpg` : tile.img;
+    return this.photoTiles.includes(tile.id) ? `assets/games/photos/${tile.id}.jpg?v=2` : tile.img;
   }
 
   nextBanner(): void {
@@ -320,7 +320,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
   readonly displayedNavRail = computed(() => {
     if (this.isSanitized()) {
       return [
-        { id: 'home', label: 'Home', icon: 'assets/icons/home.svg', badge: '' },
+        { id: 'home', label: 'Home', icon: 'assets/icons/home.svg?v=2', badge: '' },
         { id: 'live', label: 'BetPesaLIVE', icon: 'assets/icons/live.svg', badge: '68' },
         { id: 'soccer', label: 'Soccer', icon: 'assets/icons/soccer.svg', badge: '' },
         { id: 'betpesaleague', label: 'BetPesaLeague', icon: 'assets/icons/league.svg', badge: '' },
@@ -340,7 +340,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       ];
     }
     return [
-      { id: 'home', label: 'Home', icon: 'assets/icons/home.svg', badge: '' },
+      { id: 'home', label: 'Home', icon: 'assets/icons/home.svg?v=2', badge: '' },
       { id: 'live', label: 'BetPesaLIVE', icon: 'assets/icons/live.svg', badge: '68' },
       { id: 'soccer', label: 'Soccer', icon: 'assets/icons/soccer.svg', badge: '' },
       { id: 'betpesaleague', label: 'BetPesaLeague', icon: 'assets/icons/league.svg', badge: '' },

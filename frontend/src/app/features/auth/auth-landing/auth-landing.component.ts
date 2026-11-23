@@ -21,7 +21,7 @@ import { Subscription } from 'rxjs';
         <div class="lb-auth-topbar-inner">
           <a class="lb-auth-logo">
             <span class="lb-auth-mark">
-              <img src="assets/images/betpesa-logo.png" alt="" onerror="this.style.display='none'" />
+              <img src="assets/images/betpesa-logo.png?v=2" alt="" onerror="this.style.display='none'" />
             </span>
             <span class="lb-auth-word"><b>Bet</b>Pesa</span>
           </a>
@@ -34,7 +34,7 @@ import { Subscription } from 'rxjs';
 
           <!-- APP DOWNLOAD BANNER -->
           <div class="lb-auth-app" (click)="triggerAppDownload()">
-            <img src="assets/images/betpesa-logo.png" alt="BetPesa App" class="lb-auth-app-logo" onerror="this.src='favicon.svg'" />
+            <img src="assets/images/betpesa-logo.png?v=2" alt="BetPesa App" class="lb-auth-app-logo" onerror="this.src='favicon.svg'" />
             <div class="lb-auth-app-text">
               <span class="lb-auth-app-title">{{ isSanitized() ? 'BetPesa Mobile App' : 'BetPesa Mobile App' }}</span>
               <span class="lb-auth-app-sub">{{ isSanitized() ? 'Fast & Smooth &bull; Free Data Mode' : 'Instant Aviator &bull; Free Data Mode' }}</span>
