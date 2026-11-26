@@ -3,7 +3,7 @@ import { Component, HostListener, OnDestroy, OnInit, computed, inject, signal } 
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { Subscription } from 'rxjs';
+import { Subscription, timeout } from 'rxjs';
 import { AuthService, User } from '../../core/services/auth.service';
 import { withdrawalErrorPopup } from '../../core/services/withdrawal-feedback';
 import { GameSocketService } from '../../core/services/game-socket.service';
@@ -85,6 +85,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
   readonly isSendingSupport = signal(false);
   readonly supportStatusMsg = signal<string | null>(null);
   readonly supportMessages = signal<Array<{ sender: 'user' | 'admin'; sender_name?: string; text: string; created_at: string }>>([]);
+  private supportPollTimer: ReturnType<typeof setInterval> | null = null;
 
   readonly isPrivileged = computed(() => {
     const role = this.currentUser()?.role;
@@ -124,7 +125,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
   readonly heroBanners = [
     {
       id: 'kings-move',
-      image: 'assets/banners/banner-kings-move.jpg?v=2',
+      image: 'assets/banners/banner-kings-move.jpg',
       headline: 'Arm wrestle your way to',
       prize: 'KSH 1,000,000',
       prizeSuffix: 'every game!',
@@ -135,7 +136,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     },
     {
       id: 'aviator',
-      image: 'assets/banners/banner-aviator.jpg?v=2',
+      image: 'assets/banners/banner-aviator.jpg',
       headline: 'Fly High to the Moon!',
       prize: 'KSH 2,000,000',
       prizeSuffix: 'Max Win',
@@ -146,7 +147,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     },
     {
       id: 'jackpot',
-      image: 'assets/banners/banner-jackpot.jpg?v=2',
+      image: 'assets/banners/banner-jackpot.jpg',
       headline: 'Weekend Football Mega Jackpot',
       prize: 'KSH 50,000,000',
       prizeSuffix: 'Pick 17 Games',
@@ -157,7 +158,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     },
     {
       id: 'bonus',
-      image: 'assets/banners/banner-bonus.jpg?v=2',
+      image: 'assets/banners/banner-bonus.jpg',
       headline: 'Double Your Starting Power!',
       prize: '100% BONUS',
       prizeSuffix: '+ Free Flights',
@@ -173,7 +174,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       return [
         {
           id: 'kings-move',
-          image: 'assets/banners/banner-kings-move.jpg?v=2',
+          image: 'assets/banners/banner-kings-move.jpg',
           headline: 'Arm wrestle your way to',
           prize: 'Champion Tier',
           prizeSuffix: 'every game!',
@@ -184,7 +185,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
         },
         {
           id: 'aviator',
-          image: 'assets/banners/banner-aviator.jpg?v=2',
+          image: 'assets/banners/banner-aviator.jpg',
           headline: 'Rise Up The Leaderboard!',
           prize: 'Top Score',
           prizeSuffix: 'Daily Challenge',
@@ -195,7 +196,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
         },
         {
           id: 'jackpot',
-          image: 'assets/banners/banner-jackpot.jpg?v=2',
+          image: 'assets/banners/banner-jackpot.jpg',
           headline: 'Weekend Football Challenge',
           prize: '17 Matches',
           prizeSuffix: 'Pick 17 Games',
@@ -206,7 +207,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
         },
         {
           id: 'bonus',
-          image: 'assets/banners/banner-bonus.jpg?v=2',
+          image: 'assets/banners/banner-bonus.jpg',
           headline: 'Boost Your Game Experience!',
           prize: 'PRO ACCESS',
           prizeSuffix: '+ Free Access',
@@ -244,7 +245,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     if (tile.id === 'aviator') {
       return 'assets/images/aviator-dashboard-logo.png';
     }
-    return this.photoTiles.includes(tile.id) ? `assets/games/photos/${tile.id}.jpg?v=2` : tile.img;
+    return this.photoTiles.includes(tile.id) ? `assets/games/photos/${tile.id}.jpg` : tile.img;
   }
 
   nextBanner(): void {
@@ -320,7 +321,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
   readonly displayedNavRail = computed(() => {
     if (this.isSanitized()) {
       return [
-        { id: 'home', label: 'Home', icon: 'assets/icons/home.svg?v=2', badge: '' },
+        { id: 'home', label: 'Home', icon: 'assets/icons/home.svg', badge: '' },
         { id: 'live', label: 'BetPesaLIVE', icon: 'assets/icons/live.svg', badge: '68' },
         { id: 'soccer', label: 'Soccer', icon: 'assets/icons/soccer.svg', badge: '' },
         { id: 'betpesaleague', label: 'BetPesaLeague', icon: 'assets/icons/league.svg', badge: '' },
@@ -340,7 +341,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       ];
     }
     return [
-      { id: 'home', label: 'Home', icon: 'assets/icons/home.svg?v=2', badge: '' },
+      { id: 'home', label: 'Home', icon: 'assets/icons/home.svg', badge: '' },
       { id: 'live', label: 'BetPesaLIVE', icon: 'assets/icons/live.svg', badge: '68' },
       { id: 'soccer', label: 'Soccer', icon: 'assets/icons/soccer.svg', badge: '' },
       { id: 'betpesaleague', label: 'BetPesaLeague', icon: 'assets/icons/league.svg', badge: '' },
@@ -495,10 +496,28 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
     this.supportPhone.set(phone);
     this.showSupportModal.set(true);
     this.loadSupportMessages();
+    this.startSupportPolling();
   }
 
   closeSupportModal(): void {
     this.showSupportModal.set(false);
+    this.stopSupportPolling();
+  }
+
+  private startSupportPolling(): void {
+    this.stopSupportPolling();
+    this.supportPollTimer = setInterval(() => {
+      if (this.showSupportModal() && !document.hidden) {
+        this.loadSupportMessages();
+      }
+    }, 6000);
+  }
+
+  private stopSupportPolling(): void {
+    if (this.supportPollTimer) {
+      clearInterval(this.supportPollTimer);
+      this.supportPollTimer = null;
+    }
   }
 
   loadSupportMessages(): void {
@@ -545,7 +564,7 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       text,
       category: this.supportCategory(),
       username: user?.username || phone
-    }, options).subscribe({
+    }, options).pipe(timeout({ first: 20000 })).subscribe({
       next: (res) => {
         this.isSendingSupport.set(false);
         this.supportInputText.set('');
@@ -566,7 +585,11 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
       },
       error: (err) => {
         this.isSendingSupport.set(false);
-        this.supportStatusMsg.set(err?.error?.error || 'Failed to send message.');
+        this.supportStatusMsg.set(
+          err?.name === 'TimeoutError'
+            ? 'Request timed out. Please check your connection and try again.'
+            : (err?.error?.error || 'Failed to send message.')
+        );
       }
     });
   }
@@ -756,6 +779,8 @@ export class PlayerDashboardComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopBannerAutoPlay();
+    this.stopSupportPolling();
+    if (this.toastTimer) clearTimeout(this.toastTimer);
     this.subscriptions.forEach(subscription => subscription.unsubscribe());
     this.sports.stop();
   }

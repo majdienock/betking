@@ -1,4 +1,4 @@
-const CACHE_NAME = 'betpesa-app-v4';
+const CACHE_NAME = 'betpesa-app-v5';
 const STATIC_ASSETS = [
   '/favicon.ico',
   '/favicon.png',

@@ -7,7 +7,7 @@ import { AuthService } from '../../../core/services/auth.service';
 import { SanitizedModeService } from '../../../core/services/sanitized-mode.service';
 import { getBackendOrigin } from '../../../core/config/backend-url';
 import { tokenizeSupportMessage } from '../../../core/utils/support-message-links';
-import { Subscription } from 'rxjs';
+import { Subscription, finalize, timeout } from 'rxjs';
 
 @Component({
   selector: 'app-auth-landing',
@@ -21,7 +21,7 @@ import { Subscription } from 'rxjs';
         <div class="lb-auth-topbar-inner">
           <a class="lb-auth-logo">
             <span class="lb-auth-mark">
-              <img src="assets/images/betpesa-logo.png?v=2" alt="" onerror="this.style.display='none'" />
+              <img src="assets/images/betpesa-logo.png?v=2" alt="" width="42" height="42" fetchpriority="high" onerror="this.style.display='none'" />
             </span>
             <span class="lb-auth-word"><b>Bet</b>Pesa</span>
           </a>
@@ -32,9 +32,15 @@ import { Subscription } from 'rxjs';
       <main class="lb-auth-main">
         <section class="lb-auth-card">
 
+          <!-- RETURNING SESSION CHECK -->
+          <div class="lb-alert success" *ngIf="isCheckingSession" style="display:flex;align-items:center;gap:10px;">
+            <span class="lb-spinner" style="border-color:rgba(109,40,217,0.25);border-top-color:#6d28d9;"></span>
+            <span>Restoring your session...</span>
+          </div>
+
           <!-- APP DOWNLOAD BANNER -->
           <div class="lb-auth-app" (click)="triggerAppDownload()">
-            <img src="assets/images/betpesa-logo.png?v=2" alt="BetPesa App" class="lb-auth-app-logo" onerror="this.src='favicon.svg'" />
+            <img src="assets/images/betpesa-logo.png?v=2" alt="BetPesa App" width="38" height="38" class="lb-auth-app-logo" onerror="this.src='favicon.svg'" />
             <div class="lb-auth-app-text">
               <span class="lb-auth-app-title">{{ isSanitized() ? 'BetPesa Mobile App' : 'BetPesa Mobile App' }}</span>
               <span class="lb-auth-app-sub">{{ isSanitized() ? 'Fast & Smooth &bull; Free Data Mode' : 'Instant Aviator &bull; Free Data Mode' }}</span>
@@ -763,6 +769,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
   public showPassword: boolean = false;
   public showNewPassword: boolean = false;
   public isSubmitting: boolean = false;
+  public isCheckingSession: boolean = false;
   public errorMessage: string | null = null;
   public successMessage: string | null = null;
 
@@ -785,9 +792,10 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
   private backendWarmup?: Subscription;
 
   ngOnInit() {
-    // Start connecting while the person fills in the form. A failed background
-    // check is retried and surfaced by the actual login or registration request.
-    this.backendWarmup = this.authService.prepareBackend().subscribe({ error: () => {} });
+    // Start connecting while the person fills in the form when not restoring a session.
+    if (!this.authService.hasToken()) {
+      this.backendWarmup = this.authService.prepareBackend().subscribe({ error: () => {} });
+    }
 
     // Check if player arrived via account suspension
     if (new URLSearchParams(window.location.search).get('notice') === 'suspended') {
@@ -802,7 +810,13 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
     }
 
     if (this.authService.hasToken()) {
-      this.authService.loadCurrentUser().subscribe(res => {
+      this.isCheckingSession = true;
+      this.authService.loadCurrentUser().pipe(
+        finalize(() => {
+          this.isCheckingSession = false;
+          this.cdr.detectChanges();
+        })
+      ).subscribe(res => {
         if (res?.user) {
           // Everyone lands on the dashboard; admins reach the console from the profile menu.
           this.router.navigate(['/dashboard']);
@@ -810,8 +824,10 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       });
     }
 
-    // Auto-refresh support conversation every 6 seconds if phone is set
+    // Auto-refresh suspension appeal conversation every 6 seconds ONLY while appeal chat is open
     this.supportPollTimer = setInterval(() => {
+      if (!this.isSuspendedNotice || !this.isSupportExpanded) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
       if (this.supportPhone || this.phone) {
         this.loadSupportMessages(true);
       }
@@ -881,7 +897,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       text,
       category: this.supportCategory,
       username: phoneToSend
-    }, options).subscribe({
+    }, options).pipe(timeout({ first: 20000 })).subscribe({
       next: (res) => {
         this.isSendingSupport = false;
         this.supportInputText = '';
@@ -903,7 +919,7 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
       },
       error: (err) => {
         this.isSendingSupport = false;
-        this.supportStatusMsg = err?.error?.error || 'Failed to send message. Please retry.';
+        this.supportStatusMsg = err?.name === 'TimeoutError' ? 'Support server took too long to respond. Please retry.' : (err?.error?.error || 'Failed to send message. Please retry.');
         this.cdr.detectChanges();
       }
     });
@@ -1022,42 +1038,9 @@ export class AuthLandingComponent implements OnInit, OnDestroy {
           return;
         }
 
-        // Worth retrying under the raw input only when the server rejected the
-        // credentials or the formatted value itself. Retrying a 429 or a 500
-        // just doubles the load and buries the real reason behind a
-        // wrong-password message.
-        const isWorthRetrying = err?.status === 401 || err?.status === 400;
-        if (isWorthRetrying && rawPhone !== fullPhone) {
-          this.authService.login({ username: rawPhone, password: this.password }).subscribe({
-            next: (res) => {
-              this.isSubmitting = false;
-              this.cdr.detectChanges();
-              this.router.navigate(['/dashboard']).then((navigated) => {
-                if (!navigated) window.location.assign('/dashboard');
-              }).catch(() => window.location.assign('/dashboard'));
-            },
-            error: (retryErr) => {
-              this.isSubmitting = false;
-              const retryMsg = String(retryErr?.message || '');
-              if (retryErr?.status === 403 && (retryMsg.toLowerCase().includes('suspended') || (retryErr as any)?.code === 'ACCOUNT_SUSPENDED')) {
-                this.isSuspendedNotice = true;
-                this.errorMessage = 'Your account has been suspended contact our support using the chat below to appeal';
-                this.supportCategory = 'appeal';
-                this.supportPhone = this.phone;
-                this.isSupportExpanded = true;
-                this.cdr.detectChanges();
-                this.loadSupportMessages();
-                return;
-              }
-              this.errorMessage = retryErr?.message || 'Invalid phone number or password.';
-              this.cdr.detectChanges();
-            }
-          });
-        } else {
-          this.isSubmitting = false;
-          this.errorMessage = err?.message || 'Invalid phone number or password.';
-          this.cdr.detectChanges();
-        }
+        this.isSubmitting = false;
+        this.errorMessage = err?.message || 'Invalid phone number or password.';
+        this.cdr.detectChanges();
       }
     });
   }
